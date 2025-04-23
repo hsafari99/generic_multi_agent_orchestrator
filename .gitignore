@@ -21,6 +21,7 @@ build/
 
 # IDE
 .idea/
+.vscode/
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
@@ -57,3 +58,5 @@ Thumbs.db
 # Misc
 .tmp/
 .temp/
+
+.editorconfig
