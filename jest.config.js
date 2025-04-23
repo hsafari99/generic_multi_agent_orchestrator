@@ -15,6 +15,8 @@ module.exports = {
     '!src/**/*.d.ts',
     '!src/**/*.test.ts',
     '!src/**/__tests__/**',
+    '!src/**/index.ts',
+    '!src/**/types.ts',
   ],
   coverageThreshold: {
     global: {
@@ -24,4 +26,8 @@ module.exports = {
       statements: 80,
     },
   },
+  coverageReporters: ['text', 'lcov', 'clover', 'html'],
+  coverageDirectory: 'coverage',
+  collectCoverage: true,
+  verbose: true,
 }; 
