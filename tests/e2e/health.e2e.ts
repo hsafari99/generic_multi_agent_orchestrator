@@ -9,4 +9,4 @@ describe('Health Check Endpoint', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: 'ok' });
   });
-}); 
+});

@@ -1,0 +1,27 @@
+{
+  "source": {
+    "include": ["src"],
+    "includePattern": "\\.ts$",
+    "excludePattern": "(node_modules/|docs|tests)"
+  },
+  "plugins": ["plugins/markdown"],
+  "opts": {
+    "destination": "docs/jsdoc",
+    "recurse": true,
+    "readme": "docs/jsdoc/README.md",
+    "template": "node_modules/clean-jsdoc-theme"
+  },
+  "templates": {
+    "cleverLinks": true,
+    "monospaceLinks": true,
+    "search": true,
+    "default": {
+      "outputSourceFiles": true,
+      "includeDate": false
+    }
+  },
+  "markdown": {
+    "parser": "gfm",
+    "hardwrap": true
+  }
+} 

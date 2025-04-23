@@ -53,4 +53,4 @@ export const generateTestData = (type: 'user' | 'agent' | 'task') => {
  * @param ms Milliseconds to wait
  * @returns Promise that resolves after the specified time
  */
-export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)); 
+export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

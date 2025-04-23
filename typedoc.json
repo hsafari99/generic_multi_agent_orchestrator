@@ -1,0 +1,22 @@
+{
+  "entryPoints": ["./src/index.ts"],
+  "out": "docs/api",
+  "exclude": ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**"],
+  "theme": "default",
+  "name": "Generic Multi-Agent Orchestrator API",
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeExternals": true,
+  "includeVersion": true,
+  "hideGenerator": true,
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Core",
+    "Agents",
+    "Services",
+    "Utils",
+    "*"
+  ],
+  "readme": "none",
+  "disableSources": true
+} 

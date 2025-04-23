@@ -12,4 +12,4 @@ beforeAll(async () => {
 afterAll(async () => {
   // Add any global cleanup here
   console.log('Cleaning up e2e test environment...');
-}); 
+});
