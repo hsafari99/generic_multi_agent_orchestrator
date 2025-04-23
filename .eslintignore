@@ -1,0 +1,25 @@
+# Build output
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Coverage
+coverage/
+
+# Config files
+*.config.js
+*.config.ts
+
+# Generated files
+*.d.ts
+*.js.map
+
+# Documentation
+docs/
+
+# Misc
+.DS_Store
+.env
+.env.* 
