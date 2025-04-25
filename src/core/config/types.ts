@@ -7,6 +7,20 @@
  */
 
 /**
+ * WebSocket server configuration
+ */
+export interface WebSocketConfig {
+  /** Port to listen on */
+  port: number;
+  /** Optional path for WebSocket connections */
+  path?: string;
+  /** Heartbeat interval in milliseconds */
+  heartbeatInterval?: number;
+  /** Maximum number of concurrent connections */
+  maxConnections?: number;
+}
+
+/**
  * Main configuration interface for the Orchestrator
  */
 export interface OrchestratorConfig {
@@ -20,6 +34,8 @@ export interface OrchestratorConfig {
   tools: ToolConfig;
   /** Logging configuration */
   logging: LoggingConfig;
+  /** WebSocket server configuration */
+  websocket: WebSocketConfig;
 }
 
 /**

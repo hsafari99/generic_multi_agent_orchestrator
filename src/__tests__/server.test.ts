@@ -1,6 +1,9 @@
-import { WebSocketServerManager, WebSocketServerEvent } from '../server';
-import { MessageType, PROTOCOL_VERSION, HeartbeatMessage } from '../../types';
-import { AgentStatus } from '../../../agent/types';
+import {
+  WebSocketServerManager,
+  WebSocketServerEvent,
+} from '../core/communication/websocket/server';
+import { MessageType, PROTOCOL_VERSION, HeartbeatMessage } from '../core/communication/types';
+import { AgentStatus } from '../core/agent/types';
 import { WebSocket, WebSocketServer } from 'ws';
 
 jest.mock('ws', () => {
@@ -21,6 +24,17 @@ jest.mock('ws', () => {
     WebSocketServer: jest.fn().mockImplementation(() => mockWebSocketServer),
   };
 });
+
+jest.mock('../core/logging/logger', () => ({
+  Logger: {
+    getInstance: jest.fn().mockReturnValue({
+      info: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+    }),
+  },
+}));
 
 describe('WebSocketServerManager', () => {
   let server: WebSocketServerManager;

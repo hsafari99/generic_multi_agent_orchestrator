@@ -80,6 +80,12 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
       maxFiles: 5,
     },
   },
+  websocket: {
+    port: 8080,
+    path: '/ws',
+    heartbeatInterval: 30000,
+    maxConnections: 100,
+  },
 };
 
 /**
@@ -231,6 +237,19 @@ export class ConfigLoader {
       },
       level: logLevel,
     };
+
+    // WebSocket configuration
+    const wsPort = this.parseEnvInt('ORCHESTRATOR_WS_PORT', 8080);
+    const wsPath = process.env.ORCHESTRATOR_WS_PATH?.trim() || '/ws';
+    const wsHeartbeatInterval = this.parseEnvInt('ORCHESTRATOR_WS_HEARTBEAT_INTERVAL', 30000);
+    const wsMaxConnections = this.parseEnvInt('ORCHESTRATOR_WS_MAX_CONNECTIONS', 100);
+
+    this.config.websocket = {
+      port: wsPort,
+      path: wsPath,
+      heartbeatInterval: wsHeartbeatInterval,
+      maxConnections: wsMaxConnections,
+    };
   }
 
   private parseEnvInt(key: string, defaultValue: number): number {
@@ -330,6 +349,10 @@ export class ConfigLoader {
           ...this.config.logging.file,
           ...(cleanUpdates.logging?.file || {}),
         },
+      },
+      websocket: {
+        ...this.config.websocket,
+        ...(cleanUpdates.websocket || {}),
       },
     };
   }

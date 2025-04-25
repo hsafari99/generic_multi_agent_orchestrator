@@ -232,6 +232,8 @@ export interface MessageMetadata {
   tags?: string[];
   /** Whether the message requires acknowledgment */
   requiresAck: boolean;
+  /** WebSocket connection ID (optional) */
+  connectionId?: string;
 }
 
 /**
@@ -262,4 +264,11 @@ export enum TaskStatus {
   FAILED = 'FAILED',
   /** Task has been cancelled */
   CANCELLED = 'CANCELLED',
+}
+
+/**
+ * Interface for the orchestrator's message handling capabilities
+ */
+export interface IOrchestrator {
+  handleMessage(message: IMessage): Promise<void>;
 }

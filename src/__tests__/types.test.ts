@@ -1,4 +1,10 @@
-import { AgentStatus, AgentCapabilities, AgentState, AgentConfig, IAgent } from '../types';
+import {
+  AgentStatus,
+  AgentCapabilities,
+  AgentState,
+  AgentConfig,
+  IAgent,
+} from '../core/agent/types';
 
 describe('Agent Types', () => {
   describe('AgentStatus', () => {

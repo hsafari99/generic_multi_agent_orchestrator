@@ -1,7 +1,7 @@
-import { BaseAgent } from '../base';
-import { AgentConfig, AgentStatus, AgentCapabilities } from '../types';
+import { BaseAgent } from '../core/agent/base';
+import { AgentConfig, AgentStatus, AgentCapabilities } from '../core/agent/types';
 // Mock Logger
-jest.mock('../../logging/logger', () => ({
+jest.mock('../core/logging/logger', () => ({
   Logger: {
     getInstance: jest.fn().mockReturnValue({
       info: jest.fn(),

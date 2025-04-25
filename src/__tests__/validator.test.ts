@@ -1,5 +1,5 @@
-import { MessageValidator, MessageValidationError } from '../validator';
-import { MessageType, PROTOCOL_VERSION } from '../types';
+import { MessageValidator, MessageValidationError } from '../core/communication/validator';
+import { MessageType, PROTOCOL_VERSION } from '../core/communication/types';
 
 describe('MessageValidator', () => {
   describe('validate', () => {

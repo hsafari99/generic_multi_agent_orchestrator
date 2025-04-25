@@ -11,12 +11,17 @@
  * @packageDocumentation
  */
 import { IAgent, ITool, IMessage, OrchestratorStatus, MessageType } from './interfaces';
+import {
+  OrchestratorWebSocket,
+  OrchestratorWebSocketConfig,
+} from './communication/websocket/orchestratorWebSocket';
 
 export class Orchestrator {
   private agents: Map<string, IAgent>;
   private tools: Map<string, ITool>;
   private status: OrchestratorStatus;
   private messageHandlers: Map<MessageType, (message: IMessage) => Promise<void>>;
+  private webSocket: OrchestratorWebSocket | null;
 
   /**
    * Creates a new Orchestrator instance
@@ -26,6 +31,7 @@ export class Orchestrator {
     this.tools = new Map();
     this.status = OrchestratorStatus.INITIALIZING;
     this.messageHandlers = new Map();
+    this.webSocket = null;
   }
 
   /**
@@ -51,12 +57,26 @@ export class Orchestrator {
   }
 
   /**
+   * Initialize WebSocket server
+   *
+   * @param config - WebSocket server configuration
+   */
+  public initializeWebSocket(config: OrchestratorWebSocketConfig): void {
+    if (this.webSocket) {
+      throw new Error('WebSocket server already initialized');
+    }
+    this.webSocket = new OrchestratorWebSocket(this, config);
+    this.webSocket.start();
+  }
+
+  /**
    * Shutdown the orchestrator
    *
    * This method:
    * 1. Sets the status to MAINTENANCE
    * 2. Shuts down all registered agents
-   * 3. Changes status to SHUTDOWN
+   * 3. Stops the WebSocket server if initialized
+   * 4. Changes status to SHUTDOWN
    *
    * @throws {Error} If shutdown fails
    */
@@ -66,6 +86,11 @@ export class Orchestrator {
       // Shutdown all agents
       for (const agent of this.agents.values()) {
         await agent.shutdown();
+      }
+      // Stop WebSocket server if initialized
+      if (this.webSocket) {
+        this.webSocket.stop();
+        this.webSocket = null;
       }
       this.status = OrchestratorStatus.SHUTDOWN;
     } catch (error) {
