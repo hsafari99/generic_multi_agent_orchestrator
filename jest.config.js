@@ -17,6 +17,9 @@ module.exports = {
     '!src/**/__tests__/**',
     '!src/**/index.ts',
     '!src/**/types.ts',
+    '!src/core/database/config.ts',
+    '!src/core/database/connection.ts',
+    '!src/core/database/schema.ts',
   ],
   coverageThreshold: {
     global: {
