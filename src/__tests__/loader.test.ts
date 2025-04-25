@@ -1,5 +1,5 @@
-import { ConfigLoader, ConfigValidationError } from '../loader';
-import { OrchestratorConfig } from '../types';
+import { ConfigLoader, ConfigValidationError } from '../core/config/loader';
+import { OrchestratorConfig } from '../core/config/types';
 import * as fs from 'fs';
 
 jest.mock('fs');
