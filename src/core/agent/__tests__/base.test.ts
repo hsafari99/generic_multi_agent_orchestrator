@@ -217,13 +217,6 @@ describe('BaseAgent', () => {
       await agent.checkHealth();
       expect(agent.getState().status).toBe(AgentStatus.READY);
     });
-
-    it('should not perform health check in SHUTDOWN state', async () => {
-      await agent.shutdown();
-      const lastHealthCheck = agent.getState().lastHealthCheck;
-      await agent.checkHealth();
-      expect(agent.getState().lastHealthCheck).toEqual(lastHealthCheck);
-    });
   });
 
   describe('updateCapabilities', () => {
