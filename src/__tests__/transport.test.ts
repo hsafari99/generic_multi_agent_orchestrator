@@ -182,7 +182,10 @@ describe('FileTransport', () => {
     });
 
     it('should not write when file logging is disabled', async () => {
-      transport = new FileTransport({ ...mockConfig, file: { ...mockConfig.file, enabled: false } });
+      transport = new FileTransport({
+        ...mockConfig,
+        file: { ...mockConfig.file, enabled: false },
+      });
       await transport.init();
       await transport.log({
         timestamp: '2024-01-01T00:00:00.000Z',
@@ -210,4 +213,4 @@ describe('FileTransport', () => {
       expect(mockEnd).not.toHaveBeenCalled();
     });
   });
-}); 
+});
