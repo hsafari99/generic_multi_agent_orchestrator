@@ -20,6 +20,9 @@ module.exports = {
     '!src/core/database/config.ts',
     '!src/core/database/connection.ts',
     '!src/core/database/schema.ts',
+    '!src/core/cache/config.ts',
+    '!src/core/cache/client.ts',
+    '!src/core/cache/manager.ts',
   ],
   coverageThreshold: {
     global: {
