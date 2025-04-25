@@ -150,7 +150,7 @@
 - [x] Unit tests with 100% coverage
 - [x] Documentation updated
 
-#### 3.2 Agent Communication (2 days)
+#### 3.2 Agent Communication (8 days)
 **Priority**: P0
 **Dependencies**: 3.1
 **Checkpoints**:
@@ -159,6 +159,88 @@
 - [ ] Error handling complete
 - [ ] Unit tests with 100% coverage
 - [ ] Documentation updated
+
+**Subtasks**:
+
+##### 3.2.1 Communication Protocol Definition (1 day)
+**Priority**: P0
+**Dependencies**: 3.1
+**Checkpoints**:
+- [ ] Message types and formats defined
+- [ ] Protocol versioning implemented
+- [ ] Security requirements defined
+- [ ] Error handling patterns defined
+- [ ] Protocol specifications documented
+
+##### 3.2.2 WebSocket Implementation (1 day)
+**Priority**: P0
+**Dependencies**: 3.2.1
+**Checkpoints**:
+- [ ] WebSocket server implemented
+- [ ] Connection management working
+- [ ] Heartbeat mechanism implemented
+- [ ] Reconnection logic working
+- [ ] Connection monitoring in place
+
+##### 3.2.3 Message Handling System (1 day)
+**Priority**: P0
+**Dependencies**: 3.2.2
+**Checkpoints**:
+- [ ] Message routing implemented
+- [ ] Pub/sub system working
+- [ ] Message validation complete
+- [ ] Message queuing implemented
+- [ ] Message monitoring in place
+
+##### 3.2.4 Communication Storage (1 day)
+**Priority**: P0
+**Dependencies**: 3.2.3, 2.4
+**Checkpoints**:
+- [ ] Redis caching implemented
+- [ ] PostgreSQL storage working
+- [ ] Cache invalidation complete
+- [ ] Message history tracking
+- [ ] Storage monitoring in place
+
+##### 3.2.5 MCP Tool Management (1 day)
+**Priority**: P0
+**Dependencies**: 3.2.3
+**Checkpoints**:
+- [ ] MCP protocol implemented
+- [ ] Tool registration working
+- [ ] Tool versioning complete
+- [ ] Access control implemented
+- [ ] Tool monitoring in place
+
+##### 3.2.6 A2A Protocol Implementation (1 day)
+**Priority**: P0
+**Dependencies**: 3.2.3
+**Checkpoints**:
+- [ ] A2A protocol implemented
+- [ ] Peer connections working
+- [ ] Message routing complete
+- [ ] State sync implemented
+- [ ] Protocol monitoring in place
+
+##### 3.2.7 Security & Performance (1 day)
+**Priority**: P0
+**Dependencies**: 3.2.6
+**Checkpoints**:
+- [ ] Message encryption implemented
+- [ ] Rate limiting working
+- [ ] Message compression complete
+- [ ] Load balancing implemented
+- [ ] Security monitoring in place
+
+##### 3.2.8 Testing & Documentation (1 day)
+**Priority**: P0
+**Dependencies**: 3.2.7
+**Checkpoints**:
+- [ ] Unit tests complete
+- [ ] Integration tests working
+- [ ] Performance tests complete
+- [ ] Documentation updated
+- [ ] Monitoring dashboards ready
 
 #### 3.3 Agent State Management (2 days)
 **Priority**: P0
@@ -252,6 +334,14 @@
   - State validation added
   - Test coverage complete
 - Agent Communication: 0%
+  - Protocol Definition: 0%
+  - WebSocket Implementation: 0%
+  - Message Handling: 0%
+  - Communication Storage: 0%
+  - MCP Tool Management: 0%
+  - A2A Protocol: 0%
+  - Security & Performance: 0%
+  - Testing & Documentation: 0%
 - Agent State Management: 0%
 **Overall Sprint Progress**: 33%
 
