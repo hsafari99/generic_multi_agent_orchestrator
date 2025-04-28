@@ -3,6 +3,7 @@ import { Logger } from '../logging/logger';
 import { PostgresClient } from '../storage/postgres';
 import { RedisClient } from '../cache/client';
 import { MessageEncryption, EncryptedMessage } from '../security/encryption';
+import { RateLimiter, RateLimitConfig } from '../security/rate-limiter';
 
 export interface A2AMessage {
   id: string;
@@ -20,6 +21,7 @@ export interface A2AProtocolConfig {
   agentId: string;
   checkInterval?: number;
   encryptionKey?: string;
+  rateLimit?: RateLimitConfig;
 }
 
 export class A2AProtocol extends EventEmitter {
@@ -31,6 +33,7 @@ export class A2AProtocol extends EventEmitter {
   private intervalId?: NodeJS.Timeout;
   private peers: Map<string, boolean> = new Map();
   private encryption?: MessageEncryption;
+  private rateLimiter?: RateLimiter;
 
   constructor(config: A2AProtocolConfig) {
     super();
@@ -42,6 +45,10 @@ export class A2AProtocol extends EventEmitter {
 
     if (config.encryptionKey) {
       this.encryption = new MessageEncryption(config.encryptionKey);
+    }
+
+    if (config.rateLimit) {
+      this.rateLimiter = new RateLimiter(config.rateLimit);
     }
   }
 
@@ -170,6 +177,14 @@ export class A2AProtocol extends EventEmitter {
   }
 
   async sendMessage(message: Omit<A2AMessage, 'id' | 'timestamp'>): Promise<void> {
+    if (this.rateLimiter) {
+      const canSend = await this.rateLimiter.acquireToken();
+      if (!canSend) {
+        const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
+        throw new Error(`Rate limit exceeded. Try again in ${timeUntilNext}ms`);
+      }
+    }
+
     const fullMessage: A2AMessage = {
       ...message,
       id: crypto.randomUUID(),

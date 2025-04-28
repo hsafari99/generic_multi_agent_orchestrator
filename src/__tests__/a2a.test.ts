@@ -382,5 +382,93 @@ describe('A2AProtocol', () => {
         await expect(encryptedProtocol.receiveMessage(messageId)).rejects.toThrow();
       });
     });
+
+    describe('rate limiting', () => {
+      let rateLimitedProtocol: A2AProtocol;
+
+      beforeEach(() => {
+        rateLimitedProtocol = new A2AProtocol({
+          postgres: mockPostgres,
+          redis: mockRedis,
+          agentId: 'test-agent',
+          checkInterval: 1000,
+          rateLimit: {
+            tokensPerInterval: 2,
+            interval: 1000,
+            maxTokens: 2,
+          },
+        });
+      });
+
+      it('should allow messages within rate limit', async () => {
+        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          payload: { action: 'test' },
+        };
+
+        mockPostgres.query
+          .mockResolvedValueOnce([]) // createTables
+          .mockResolvedValueOnce([]) // loadPeers
+          .mockResolvedValueOnce([]) // first message
+          .mockResolvedValueOnce([]); // second message
+
+        await rateLimitedProtocol.initialize();
+        await rateLimitedProtocol.sendMessage(message);
+        await rateLimitedProtocol.sendMessage(message);
+
+        expect(mockPostgres.query).toHaveBeenCalledTimes(4);
+      });
+
+      it('should reject messages exceeding rate limit', async () => {
+        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          payload: { action: 'test' },
+        };
+
+        mockPostgres.query
+          .mockResolvedValueOnce([]) // createTables
+          .mockResolvedValueOnce([]) // loadPeers
+          .mockResolvedValueOnce([]) // insert message
+          .mockResolvedValueOnce([]); // insert message
+
+        await rateLimitedProtocol.initialize();
+        await rateLimitedProtocol.sendMessage(message);
+        await rateLimitedProtocol.sendMessage(message);
+
+        await expect(rateLimitedProtocol.sendMessage(message)).rejects.toThrow(
+          'Rate limit exceeded'
+        );
+      });
+
+      it('should allow messages after rate limit interval', async () => {
+        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          payload: { action: 'test' },
+        };
+
+        mockPostgres.query
+          .mockResolvedValueOnce([]) // createTables
+          .mockResolvedValueOnce([]) // loadPeers
+          .mockResolvedValueOnce([]) // first message
+          .mockResolvedValueOnce([]) // second message
+          .mockResolvedValueOnce([]); // third message after interval
+
+        await rateLimitedProtocol.initialize();
+        await rateLimitedProtocol.sendMessage(message);
+        await rateLimitedProtocol.sendMessage(message);
+
+        // Wait for rate limit interval
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        await rateLimitedProtocol.sendMessage(message);
+        expect(mockPostgres.query).toHaveBeenCalledTimes(5);
+      });
+    });
   });
 });
