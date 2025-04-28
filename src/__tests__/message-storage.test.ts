@@ -136,9 +136,7 @@ describe('MessageStorage', () => {
       const result = await storage.getQueueStats();
 
       expect(result).toEqual(mockStats);
-      expect(mockPostgres.query).toHaveBeenCalledWith(
-        expect.stringContaining('SELECT')
-      );
+      expect(mockPostgres.query).toHaveBeenCalledWith(expect.stringContaining('SELECT'));
     });
   });
 

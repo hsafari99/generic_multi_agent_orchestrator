@@ -36,10 +36,12 @@ describe('PostgresClient', () => {
     jest.clearAllMocks();
     client = new PostgresClient(config);
     mockPool = (Pool as unknown as jest.Mock).mock.results[0].value;
-    (mockPool.connect as jest.Mock).mockImplementation(() => Promise.resolve({
-      query: jest.fn(),
-      release: jest.fn(),
-    }));
+    (mockPool.connect as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        query: jest.fn(),
+        release: jest.fn(),
+      })
+    );
   });
 
   describe('constructor', () => {
@@ -92,7 +94,10 @@ describe('PostgresClient', () => {
       const params = [1, 'test'];
       const result = await client.query('SELECT * FROM test WHERE id = $1 AND name = $2', params);
       expect(result).toEqual(mockRows);
-      expect(mockClient.query).toHaveBeenCalledWith('SELECT * FROM test WHERE id = $1 AND name = $2', params);
+      expect(mockClient.query).toHaveBeenCalledWith(
+        'SELECT * FROM test WHERE id = $1 AND name = $2',
+        params
+      );
       expect(mockClient.release).toHaveBeenCalled();
     });
 
@@ -147,4 +152,4 @@ describe('PostgresClient', () => {
       expect(mockPool.end).toHaveBeenCalled();
     });
   });
-}); 
+});

@@ -11,9 +11,10 @@ export class MessageStorage {
   private logger: Logger;
 
   constructor(config: MessageStorageConfig) {
-    this.postgres = config.postgres instanceof PostgresClient 
-      ? config.postgres 
-      : new PostgresClient(config.postgres);
+    this.postgres =
+      config.postgres instanceof PostgresClient
+        ? config.postgres
+        : new PostgresClient(config.postgres);
     this.logger = Logger.getInstance();
   }
 
@@ -86,13 +87,15 @@ export class MessageStorage {
       COUNT(*) FILTER (WHERE status = 'processing') as "processingCount",
       COUNT(*) FILTER (WHERE status = 'dead-letter') as "deadLetterCount"
     FROM messages`;
-    
-    const result = await this.postgres.query<{
-      queueSize: number;
-      processingCount: number;
-      deadLetterCount: number;
-    }[]>(query);
-    
+
+    const result = await this.postgres.query<
+      {
+        queueSize: number;
+        processingCount: number;
+        deadLetterCount: number;
+      }[]
+    >(query);
+
     return result[0];
   }
 
