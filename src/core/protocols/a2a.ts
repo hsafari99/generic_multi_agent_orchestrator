@@ -4,6 +4,7 @@ import { PostgresClient } from '../storage/postgres';
 import { RedisClient } from '../cache/client';
 import { MessageEncryption, EncryptedMessage } from '../security/encryption';
 import { RateLimiter, RateLimitConfig } from '../security/rate-limiter';
+import { MessageCompression, CompressionConfig, CompressedMessage } from '../security/compression';
 
 export interface A2AMessage {
   id: string;
@@ -22,6 +23,7 @@ export interface A2AProtocolConfig {
   checkInterval?: number;
   encryptionKey?: string;
   rateLimit?: RateLimitConfig;
+  compression?: CompressionConfig;
 }
 
 export class A2AProtocol extends EventEmitter {
@@ -34,6 +36,7 @@ export class A2AProtocol extends EventEmitter {
   private peers: Map<string, boolean> = new Map();
   private encryption?: MessageEncryption;
   private rateLimiter?: RateLimiter;
+  private compression?: MessageCompression;
 
   constructor(config: A2AProtocolConfig) {
     super();
@@ -49,6 +52,10 @@ export class A2AProtocol extends EventEmitter {
 
     if (config.rateLimit) {
       this.rateLimiter = new RateLimiter(config.rateLimit);
+    }
+
+    if (config.compression) {
+      this.compression = new MessageCompression(config.compression);
     }
   }
 
@@ -196,10 +203,15 @@ export class A2AProtocol extends EventEmitter {
       recipient: fullMessage.recipient,
     });
 
-    // Encrypt message if encryption is enabled
-    const messageToStore = this.encryption
+    // Compress message if compression is enabled
+    let messageToStore = this.encryption
       ? this.encryption.encrypt(JSON.stringify(fullMessage))
       : fullMessage.payload;
+
+    if (this.compression) {
+      const compressed = await this.compression.compress(JSON.stringify(messageToStore));
+      messageToStore = compressed.compressed ? compressed : messageToStore;
+    }
 
     // Store message in database
     await this.postgres.query(
@@ -242,9 +254,16 @@ export class A2AProtocol extends EventEmitter {
 
       if (cachedMessage) {
         const message = JSON.parse(cachedMessage);
-        return this.encryption && this.isEncryptedMessage(message)
-          ? JSON.parse(this.encryption.decrypt(message))
-          : message;
+        let decryptedMessage =
+          this.encryption && this.isEncryptedMessage(message)
+            ? JSON.parse(this.encryption.decrypt(message))
+            : message;
+
+        if (this.compression && this.isCompressedMessage(decryptedMessage)) {
+          decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
+        }
+
+        return decryptedMessage;
       }
 
       // Try database
@@ -270,10 +289,14 @@ export class A2AProtocol extends EventEmitter {
       }
 
       const message = result[0].payload;
-      const decryptedMessage =
+      let decryptedMessage =
         this.encryption && this.isEncryptedMessage(message)
           ? JSON.parse(this.encryption.decrypt(message))
           : message;
+
+      if (this.compression && this.isCompressedMessage(decryptedMessage)) {
+        decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
+      }
 
       // Reconstruct the complete message object
       const reconstructedMessage: A2AMessage = {
@@ -311,6 +334,16 @@ export class A2AProtocol extends EventEmitter {
       'encryptedData' in message &&
       'iv' in message &&
       'algorithm' in message
+    );
+  }
+
+  private isCompressedMessage(message: any): message is CompressedMessage {
+    return (
+      typeof message === 'object' &&
+      'compressed' in message &&
+      'data' in message &&
+      'originalSize' in message &&
+      'compressedSize' in message
     );
   }
 

@@ -331,7 +331,12 @@
   - Encryption/decryption methods
   - Integration with A2A protocol
   - Comprehensive test coverage
-- [ ] Rate limiting working
+- [x] Rate limiting working
+  - Token bucket algorithm implementation
+  - Configurable rate limits
+  - Per-protocol rate limiting
+  - Rate limit monitoring
+  - Comprehensive test coverage
 - [ ] Message compression complete
 - [ ] Load balancing implemented
 - [ ] Security monitoring in place

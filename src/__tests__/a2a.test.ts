@@ -3,6 +3,7 @@ import { PostgresClient } from '../core/storage/postgres';
 import { RedisClient } from '../core/cache/client';
 import { Logger } from '../core/logging/logger';
 import { MessageEncryption } from '../core/security/encryption';
+import { MessageCompression } from '../core/security/compression';
 
 jest.mock('../core/storage/postgres');
 jest.mock('../core/cache/client');
@@ -468,6 +469,109 @@ describe('A2AProtocol', () => {
 
         await rateLimitedProtocol.sendMessage(message);
         expect(mockPostgres.query).toHaveBeenCalledTimes(5);
+      });
+    });
+
+    describe('compression', () => {
+      let compressedProtocol: A2AProtocol;
+
+      beforeEach(() => {
+        compressedProtocol = new A2AProtocol({
+          postgres: mockPostgres,
+          redis: mockRedis,
+          agentId: 'test-agent',
+          checkInterval: 1000,
+          compression: {
+            threshold: 100,
+            level: 6,
+          },
+        });
+      });
+
+      it('should not compress small messages', async () => {
+        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          payload: { action: 'test' },
+        };
+
+        mockPostgres.query
+          .mockResolvedValueOnce([]) // createTables
+          .mockResolvedValueOnce([]) // loadPeers
+          .mockResolvedValueOnce([]); // insert message
+
+        await compressedProtocol.initialize();
+        await compressedProtocol.sendMessage(message);
+
+        // Verify message was not compressed
+        expect(mockPostgres.query).toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO a2a_messages'),
+          expect.arrayContaining([
+            expect.any(String), // id
+            'request',
+            'test-agent',
+            'peer1',
+            expect.any(Date),
+            expect.stringMatching(/{"action":"test"}/),
+            expect.any(String),
+          ])
+        );
+      });
+
+      it('should compress large messages', async () => {
+        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          payload: { data: 'x'.repeat(200) },
+        };
+
+        mockPostgres.query
+          .mockResolvedValueOnce([]) // createTables
+          .mockResolvedValueOnce([]) // loadPeers
+          .mockResolvedValueOnce([]); // insert message
+
+        await compressedProtocol.initialize();
+        await compressedProtocol.sendMessage(message);
+
+        // Verify message was compressed
+        expect(mockPostgres.query).toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO a2a_messages'),
+          expect.arrayContaining([
+            expect.any(String), // id
+            'request',
+            'test-agent',
+            'peer1',
+            expect.any(Date),
+            expect.stringMatching(
+              /{"compressed":true,"data":".*","originalSize":\d+,"compressedSize":\d+}/
+            ),
+            expect.any(String),
+          ])
+        );
+      });
+
+      it('should decompress messages when receiving', async () => {
+        const messageId = 'test-message-id';
+        const originalMessage: A2AMessage = {
+          id: messageId,
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          timestamp: Date.now(),
+          payload: { data: 'x'.repeat(200) },
+        };
+
+        const compression = new MessageCompression({ threshold: 100 });
+        const compressedMessage = await compression.compress(JSON.stringify(originalMessage));
+
+        (mockRedis.getClient().get as jest.Mock).mockResolvedValueOnce(
+          JSON.stringify(compressedMessage)
+        );
+
+        const message = await compressedProtocol.receiveMessage(messageId);
+        expect(message).toEqual(originalMessage);
       });
     });
   });
