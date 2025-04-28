@@ -28,15 +28,23 @@ export enum AgentStatus {
  */
 export enum MessageType {
   /** Message containing a task to be executed */
-  TASK = 'TASK',
+  TASK = 'task',
   /** Message containing the result of a task execution */
   RESULT = 'RESULT',
   /** Message containing status updates */
   STATUS = 'STATUS',
   /** Message containing error information */
-  ERROR = 'ERROR',
+  ERROR = 'error',
   /** Message containing control commands */
   CONTROL = 'CONTROL',
+  /** Message containing a response to a task */
+  RESPONSE = 'response',
+  /** Message containing a heartbeat */
+  HEARTBEAT = 'heartbeat',
+  /** Message containing a broadcast */
+  BROADCAST = 'broadcast',
+  /** Message containing a message processing command */
+  MCP = 'mcp',
 }
 
 /**
