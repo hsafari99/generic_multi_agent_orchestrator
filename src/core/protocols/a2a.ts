@@ -201,6 +201,9 @@ export class A2AProtocol extends EventEmitter {
     this.logger.info('Sending A2A message', {
       messageId: fullMessage.id,
       recipient: fullMessage.recipient,
+      type: fullMessage.type,
+      payload: fullMessage.payload,
+      metadata: fullMessage.metadata,
     });
 
     // Compress message if compression is enabled
@@ -208,26 +211,52 @@ export class A2AProtocol extends EventEmitter {
       ? this.encryption.encrypt(JSON.stringify(fullMessage))
       : fullMessage.payload;
 
+    this.logger.debug('Message after encryption', {
+      messageId: fullMessage.id,
+      isEncrypted: !!this.encryption,
+      messageToStore,
+    });
+
     if (this.compression) {
-      const compressed = await this.compression.compress(JSON.stringify(messageToStore));
-      messageToStore = compressed.compressed ? compressed : messageToStore;
+      messageToStore = await this.compression.compress(JSON.stringify(messageToStore));
+    } else {
+      // Wrap in compression object for consistency
+      messageToStore = {
+        compressed: false,
+        data: JSON.stringify(messageToStore),
+        originalSize: Buffer.byteLength(JSON.stringify(messageToStore), 'utf8'),
+        compressedSize: Buffer.byteLength(JSON.stringify(messageToStore), 'utf8'),
+      };
     }
 
+    this.logger.debug('Message after compression', {
+      messageId: fullMessage.id,
+      isCompressed: !!this.compression,
+      messageToStore,
+    });
+
     // Store message in database
+    const dbParams = [
+      fullMessage.id,
+      fullMessage.type,
+      fullMessage.sender,
+      fullMessage.recipient,
+      new Date(fullMessage.timestamp),
+      JSON.stringify(messageToStore),
+      JSON.stringify(fullMessage.metadata || {}),
+    ];
+
+    this.logger.debug('Database parameters', {
+      messageId: fullMessage.id,
+      params: dbParams,
+    });
+
     await this.postgres.query(
       `
       INSERT INTO a2a_messages (id, type, sender, recipient, timestamp, payload, metadata)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       `,
-      [
-        fullMessage.id,
-        fullMessage.type,
-        fullMessage.sender,
-        fullMessage.recipient,
-        new Date(fullMessage.timestamp),
-        JSON.stringify(messageToStore),
-        JSON.stringify(fullMessage.metadata || {}),
-      ]
+      dbParams
     );
 
     // Cache message for quick retrieval

@@ -149,6 +149,11 @@ export class ToolMonitor extends EventEmitter {
         SELECT * FROM tool_metrics
       `);
 
+      if (!result || !Array.isArray(result)) {
+        this.logger.warn('No metrics found or invalid result format');
+        return;
+      }
+
       for (const row of result) {
         const metrics: ToolMetrics = {
           toolId: row.tool_id,

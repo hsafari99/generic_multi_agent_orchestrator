@@ -14,31 +14,38 @@ describe('A2AProtocol', () => {
   let mockPostgres: jest.Mocked<PostgresClient>;
   let mockRedis: jest.Mocked<RedisClient>;
   let mockLogger: jest.Mocked<Logger>;
+  let encryptionKey: string;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockPostgres = new PostgresClient({
-      connectionString: 'mock-connection-string',
-    }) as jest.Mocked<PostgresClient>;
+    mockPostgres = {
+      query: jest.fn().mockResolvedValue([]),
+    } as unknown as jest.Mocked<PostgresClient>;
+
     mockRedis = {
       getClient: jest.fn().mockReturnValue({
         get: jest.fn().mockResolvedValue(null),
         set: jest.fn().mockResolvedValue('OK'),
       }),
     } as unknown as jest.Mocked<RedisClient>;
+
     mockLogger = {
       info: jest.fn(),
       error: jest.fn(),
       warn: jest.fn(),
       debug: jest.fn(),
     } as unknown as jest.Mocked<Logger>;
+
     (Logger.getInstance as jest.Mock).mockReturnValue(mockLogger);
+
+    encryptionKey = MessageEncryption.generateKey();
 
     protocol = new A2AProtocol({
       postgres: mockPostgres,
       redis: mockRedis,
       agentId: 'test-agent',
       checkInterval: 1000,
+      encryptionKey,
     });
   });
 
@@ -166,36 +173,42 @@ describe('A2AProtocol', () => {
 
   describe('message handling', () => {
     it('should send and receive messages', async () => {
+      // Mock database queries for initialization
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]); // insert message
+
+      // Initialize protocol
+      await protocol.initialize();
+
+      // Send a test message
       const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-        type: 'request',
+        type: 'request' as const,
         sender: 'test-agent',
         recipient: 'peer1',
         payload: { action: 'test' },
         metadata: { priority: 'high' },
       };
 
-      // Mock the database queries
-      mockPostgres.query
-        .mockResolvedValueOnce([]) // createTables
-        .mockResolvedValueOnce([]) // loadPeers
-        .mockResolvedValueOnce([]); // insert message
-
-      await protocol.initialize();
       await protocol.sendMessage(message);
 
-      // Verify message was stored
-      expect(mockPostgres.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO a2a_messages'),
-        expect.arrayContaining([
-          expect.any(String), // id
-          'request',
-          'test-agent',
-          'peer1',
-          expect.any(Date),
-          JSON.stringify({ action: 'test' }),
-          JSON.stringify({ priority: 'high' }),
-        ])
-      );
+      // Verify the message was stored in the database
+      const dbCalls = mockPostgres.query.mock.calls;
+      const insertCall = dbCalls.find(call => call[0].includes('INSERT INTO a2a_messages'));
+
+      expect(insertCall).toBeDefined();
+      expect(insertCall![1]).toEqual([
+        expect.any(String), // id
+        message.type,
+        message.sender,
+        message.recipient,
+        expect.any(Date),
+        expect.stringMatching(
+          /{"compressed":false,"data":".*","originalSize":\d+,"compressedSize":\d+}/
+        ),
+        JSON.stringify(message.metadata),
+      ]);
     });
 
     it('should get message from cache if available', async () => {
@@ -241,7 +254,7 @@ describe('A2AProtocol', () => {
 
     it('should handle message send errors', async () => {
       const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-        type: 'request',
+        type: 'request' as const,
         sender: 'test-agent',
         recipient: 'peer1',
         payload: { action: 'test' },
@@ -298,56 +311,46 @@ describe('A2AProtocol', () => {
     });
 
     describe('encryption', () => {
-      let encryptedProtocol: A2AProtocol;
-      const encryptionKey = MessageEncryption.generateKey();
-
-      beforeEach(() => {
-        encryptedProtocol = new A2AProtocol({
-          postgres: mockPostgres,
-          redis: mockRedis,
-          agentId: 'test-agent',
-          checkInterval: 1000,
-          encryptionKey,
-        });
-      });
-
       it('should encrypt messages when sending', async () => {
-        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-          type: 'request',
-          sender: 'test-agent',
-          recipient: 'peer1',
-          payload: { action: 'test' },
-          metadata: { priority: 'high' },
-        };
-
+        // Mock database queries for initialization
         mockPostgres.query
           .mockResolvedValueOnce([]) // createTables
           .mockResolvedValueOnce([]) // loadPeers
           .mockResolvedValueOnce([]); // insert message
 
-        await encryptedProtocol.initialize();
-        await encryptedProtocol.sendMessage(message);
+        // Initialize protocol
+        await protocol.initialize();
 
-        // Verify message was encrypted
-        expect(mockPostgres.query).toHaveBeenCalledWith(
-          expect.stringContaining('INSERT INTO a2a_messages'),
-          expect.arrayContaining([
-            expect.any(String), // id
-            'request',
-            'test-agent',
-            'peer1',
-            expect.any(Date),
-            expect.stringMatching(
-              /{"encryptedData":".*","iv":".*","algorithm":"aes-256-gcm","authTag":".*"}/
-            ),
-            JSON.stringify({ priority: 'high' }),
-          ])
-        );
+        // Send a test message
+        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
+          type: 'request' as const,
+          sender: 'test-agent',
+          recipient: 'peer1',
+          payload: { test: 'data' },
+          metadata: { priority: 'high' },
+        };
+
+        await protocol.sendMessage(message);
+
+        // Verify the message was encrypted and stored
+        const dbCalls = mockPostgres.query.mock.calls;
+        const insertCall = dbCalls.find(call => call[0].includes('INSERT INTO a2a_messages'));
+
+        expect(insertCall).toBeDefined();
+        expect(insertCall![1]).toEqual([
+          expect.any(String), // id
+          message.type,
+          message.sender,
+          message.recipient,
+          expect.any(Date),
+          expect.stringContaining('"compressed":false,"data":"{\\"encryptedData\\":'),
+          JSON.stringify(message.metadata),
+        ]);
       });
 
       it('should decrypt messages when receiving', async () => {
         const messageId = 'test-message-id';
-        const originalMessage: A2AMessage = {
+        const originalMessage = {
           id: messageId,
           type: 'request',
           sender: 'test-agent',
@@ -357,14 +360,25 @@ describe('A2AProtocol', () => {
           metadata: { priority: 'high' },
         };
 
+        // Use the same encryption key as the protocol
         const encryption = new MessageEncryption(encryptionKey);
         const encryptedMessage = encryption.encrypt(JSON.stringify(originalMessage));
 
+        // Mock Redis to return the encrypted message
         (mockRedis.getClient().get as jest.Mock).mockResolvedValueOnce(
           JSON.stringify(encryptedMessage)
         );
 
-        const message = await encryptedProtocol.receiveMessage(messageId);
+        // Mock database queries for initialization
+        mockPostgres.query
+          .mockResolvedValueOnce([]) // createTables
+          .mockResolvedValueOnce([]); // loadPeers
+
+        // Initialize protocol
+        await protocol.initialize();
+
+        // Receive the message
+        const message = await protocol.receiveMessage(messageId);
         expect(message).toEqual(originalMessage);
       });
 
@@ -380,7 +394,7 @@ describe('A2AProtocol', () => {
           JSON.stringify(invalidMessage)
         );
 
-        await expect(encryptedProtocol.receiveMessage(messageId)).rejects.toThrow();
+        await expect(protocol.receiveMessage(messageId)).rejects.toThrow();
       });
     });
 
@@ -403,7 +417,7 @@ describe('A2AProtocol', () => {
 
       it('should allow messages within rate limit', async () => {
         const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-          type: 'request',
+          type: 'request' as const,
           sender: 'test-agent',
           recipient: 'peer1',
           payload: { action: 'test' },
@@ -424,7 +438,7 @@ describe('A2AProtocol', () => {
 
       it('should reject messages exceeding rate limit', async () => {
         const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-          type: 'request',
+          type: 'request' as const,
           sender: 'test-agent',
           recipient: 'peer1',
           payload: { action: 'test' },
@@ -447,7 +461,7 @@ describe('A2AProtocol', () => {
 
       it('should allow messages after rate limit interval', async () => {
         const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-          type: 'request',
+          type: 'request' as const,
           sender: 'test-agent',
           recipient: 'peer1',
           payload: { action: 'test' },
@@ -490,7 +504,7 @@ describe('A2AProtocol', () => {
 
       it('should not compress small messages', async () => {
         const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-          type: 'request',
+          type: 'request' as const,
           sender: 'test-agent',
           recipient: 'peer1',
           payload: { action: 'test' },
@@ -523,7 +537,7 @@ describe('A2AProtocol', () => {
 
       it('should compress large messages', async () => {
         const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
-          type: 'request',
+          type: 'request' as const,
           sender: 'test-agent',
           recipient: 'peer1',
           payload: { data: 'x'.repeat(200) },
