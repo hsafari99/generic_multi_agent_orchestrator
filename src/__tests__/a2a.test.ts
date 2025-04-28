@@ -513,7 +513,9 @@ describe('A2AProtocol', () => {
             'test-agent',
             'peer1',
             expect.any(Date),
-            expect.stringMatching(/{"action":"test"}/),
+            expect.stringMatching(
+              /{"compressed":false,"data":".*","originalSize":\d+,"compressedSize":\d+}/
+            ),
             expect.any(String),
           ])
         );
