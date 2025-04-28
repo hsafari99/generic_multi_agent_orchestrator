@@ -55,4 +55,4 @@ async function addMessageHistoryTable() {
 }
 
 // Run the script
-addMessageHistoryTable(); 
+addMessageHistoryTable();
