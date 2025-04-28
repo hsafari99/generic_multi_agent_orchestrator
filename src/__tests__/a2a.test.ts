@@ -4,6 +4,7 @@ import { RedisClient } from '../core/cache/client';
 import { Logger } from '../core/logging/logger';
 import { MessageEncryption } from '../core/security/encryption';
 import { MessageCompression } from '../core/security/compression';
+import { RateLimiter } from '../core/security/rate-limiter';
 
 jest.mock('../core/storage/postgres');
 jest.mock('../core/cache/client');
@@ -46,6 +47,11 @@ describe('A2AProtocol', () => {
       agentId: 'test-agent',
       checkInterval: 1000,
       encryptionKey,
+      rateLimit: {
+        tokensPerInterval: 1000,
+        interval: 60000,
+        maxTokens: 2,
+      },
     });
   });
 
@@ -239,7 +245,15 @@ describe('A2AProtocol', () => {
           sender: 'test-agent',
           recipient: 'peer1',
           timestamp: new Date(),
-          payload: { action: 'test' },
+          payload: {
+            id: messageId,
+            type: 'request',
+            sender: 'test-agent',
+            recipient: 'peer1',
+            timestamp: Date.now(),
+            payload: { action: 'test' },
+            metadata: { priority: 'high' },
+          },
           metadata: { priority: 'high' },
         },
       ];
@@ -250,6 +264,11 @@ describe('A2AProtocol', () => {
       const message = await protocol.receiveMessage(messageId);
       expect(message).toBeDefined();
       expect(message?.id).toBe(messageId);
+      expect(message?.type).toBe('request');
+      expect(message?.sender).toBe('test-agent');
+      expect(message?.recipient).toBe('peer1');
+      expect(message?.payload).toEqual({ action: 'test' });
+      expect(message?.metadata).toEqual({ priority: 'high' });
     });
 
     it('should handle message send errors', async () => {
@@ -286,6 +305,12 @@ describe('A2AProtocol', () => {
 
     it('should handle different message types', async () => {
       const messageTypes: Array<A2AMessage['type']> = ['request', 'response', 'notification'];
+      const noRateLimitProtocol = new A2AProtocol({
+        postgres: mockPostgres,
+        redis: mockRedis,
+        agentId: 'test-agent',
+        checkInterval: 1000,
+      });
 
       for (const type of messageTypes) {
         const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
@@ -300,8 +325,8 @@ describe('A2AProtocol', () => {
           .mockResolvedValueOnce([]) // loadPeers
           .mockResolvedValueOnce([]); // insert message
 
-        await protocol.initialize();
-        await protocol.sendMessage(message);
+        await noRateLimitProtocol.initialize();
+        await noRateLimitProtocol.sendMessage(message);
 
         expect(mockPostgres.query).toHaveBeenCalledWith(
           expect.stringContaining('INSERT INTO a2a_messages'),
@@ -408,8 +433,8 @@ describe('A2AProtocol', () => {
           agentId: 'test-agent',
           checkInterval: 1000,
           rateLimit: {
-            tokensPerInterval: 2,
-            interval: 1000,
+            tokensPerInterval: 1000,
+            interval: 60000,
             maxTokens: 2,
           },
         });
@@ -912,6 +937,254 @@ describe('A2AProtocol', () => {
       expect(peer1Ratio).toBeGreaterThan(0.4); // Should be around 0.44 (2/4.5)
       expect(peer2Ratio).toBeLessThan(0.3); // Should be around 0.22 (1/4.5)
       expect(peer3Ratio).toBeGreaterThan(0.3); // Should be around 0.33 (1.5/4.5)
+    });
+  });
+
+  describe('Security Monitoring', () => {
+    let a2a: A2AProtocol;
+
+    beforeEach(async () => {
+      // Mock database responses for initialization
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]); // loadPeers
+
+      a2a = new A2AProtocol({
+        postgres: mockPostgres,
+        redis: mockRedis,
+        agentId: 'test-agent',
+        checkInterval: 1000,
+        encryptionKey: 'test-key',
+        rateLimit: {
+          tokensPerInterval: 1000,
+          interval: 60000,
+          maxTokens: 2,
+        },
+        compression: {
+          threshold: 100,
+          level: 6,
+        },
+      });
+      await a2a.initialize();
+    });
+
+    afterEach(async () => {
+      await a2a.stop();
+    });
+
+    it('should create security monitoring tables during initialization', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([{ exists: true }]) // first table check
+        .mockResolvedValueOnce([{ exists: true }]); // second table check
+
+      await a2a.initialize();
+
+      // Verify the tables were created
+      const calls = mockPostgres.query.mock.calls;
+      const createTablesCall = calls.find(
+        call =>
+          call[0].includes('CREATE TABLE IF NOT EXISTS a2a_security_metrics') ||
+          call[0].includes('CREATE TABLE IF NOT EXISTS a2a_security_events')
+      );
+
+      expect(createTablesCall).toBeDefined();
+      expect(createTablesCall![0]).toContain('CREATE TABLE IF NOT EXISTS');
+    });
+
+    it('should log security events and update metrics', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert event
+        .mockResolvedValueOnce([]); // update metrics
+
+      await a2a['logSecurityEvent']({
+        type: 'encryption',
+        severity: 'high',
+        message: 'Test security event',
+        timestamp: Date.now(),
+        metadata: { test: 'data' },
+      });
+
+      const calls = mockPostgres.query.mock.calls;
+      const eventCall = calls.find(call => call[0].includes('INSERT INTO a2a_security_events'));
+      const metricsCall = calls.find(call => call[0].includes('INSERT INTO a2a_security_metrics'));
+
+      expect(eventCall).toBeDefined();
+      expect(eventCall![1]).toEqual([
+        expect.any(String), // id
+        'test-agent',
+        'encryption',
+        'high',
+        'Test security event',
+        JSON.stringify({ test: 'data' }),
+      ]);
+
+      expect(metricsCall).toBeDefined();
+      expect(metricsCall![1]).toEqual([
+        'test-agent',
+        1, // encryption_failures
+        0, // decryption_failures
+        0, // rate_limit_violations
+        0, // compression_failures
+        0, // invalid_messages
+      ]);
+    });
+
+    it('should get security metrics', async () => {
+      // Mock database response
+      mockPostgres.query.mockResolvedValueOnce([
+        {
+          encryption_failures: 5,
+          decryption_failures: 3,
+          rate_limit_violations: 2,
+          compression_failures: 1,
+          invalid_messages: 0,
+          last_update: new Date(),
+        },
+      ]);
+
+      const metrics = await a2a.getSecurityMetrics();
+
+      expect(metrics).toEqual({
+        encryptionFailures: 5,
+        decryptionFailures: 3,
+        rateLimitViolations: 2,
+        compressionFailures: 1,
+        invalidMessages: 0,
+        lastUpdate: expect.any(Number),
+      });
+    });
+
+    it('should get security events with filters', async () => {
+      // Mock database response
+      mockPostgres.query.mockResolvedValueOnce([
+        {
+          id: 'event1',
+          type: 'encryption',
+          severity: 'high',
+          message: 'Test event',
+          timestamp: new Date(),
+          metadata: { test: 'data' },
+        },
+      ]);
+
+      const events = await a2a.getSecurityEvents({
+        type: 'encryption',
+        severity: 'high',
+        startTime: Date.now() - 3600000,
+        endTime: Date.now(),
+        limit: 10,
+      });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual({
+        type: 'encryption',
+        severity: 'high',
+        message: 'Test event',
+        timestamp: expect.any(Number),
+        metadata: { test: 'data' },
+      });
+    });
+
+    it('should log encryption failure', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert event
+        .mockResolvedValueOnce([]); // update metrics
+
+      const message = {
+        type: 'request' as const,
+        sender: 'test-agent',
+        recipient: 'peer1',
+        payload: { test: 'data' },
+      };
+
+      // Mock encryption failure
+      jest.spyOn(MessageEncryption.prototype, 'encrypt').mockImplementation(() => {
+        throw new Error('Encryption failed');
+      });
+
+      await expect(a2a.sendMessage(message)).rejects.toThrow('Encryption failed');
+
+      const calls = mockPostgres.query.mock.calls;
+      const eventCall = calls.find(call => call[0].includes('INSERT INTO a2a_security_events'));
+
+      expect(eventCall).toBeDefined();
+      expect(eventCall![1]).toEqual([
+        expect.any(String), // id
+        'test-agent',
+        'encryption',
+        'high',
+        'Failed to encrypt message',
+        expect.stringMatching(/{"error":"Encryption failed","messageId":"[0-9a-f-]+"}/),
+      ]);
+    });
+
+    it('should log rate limit violation', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert event
+        .mockResolvedValueOnce([]); // update metrics
+
+      const message = {
+        type: 'request' as const,
+        sender: 'test-agent',
+        recipient: 'peer1',
+        payload: { test: 'data' },
+      };
+
+      // Mock rate limit violation
+      jest.spyOn(RateLimiter.prototype, 'acquireToken').mockResolvedValue(false);
+      jest.spyOn(RateLimiter.prototype, 'getTimeUntilNextToken').mockReturnValue(1000);
+
+      await expect(a2a.sendMessage(message)).rejects.toThrow('Rate limit exceeded');
+
+      const calls = mockPostgres.query.mock.calls;
+      const eventCall = calls.find(call => call[0].includes('INSERT INTO a2a_security_events'));
+
+      expect(eventCall).toBeDefined();
+      expect(eventCall![1]).toEqual([
+        expect.any(String), // id
+        'test-agent',
+        'rate_limit',
+        'medium',
+        'Rate limit exceeded. Try again in 1000ms',
+        JSON.stringify({
+          timeUntilNext: 1000,
+          messageType: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+        }),
+      ]);
+    });
+
+    it('should log invalid message structure', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert event
+        .mockResolvedValueOnce([]); // update metrics
+
+      const invalidMessage = {
+        id: 'test-id',
+        type: 'invalid-type',
+        sender: 'test-agent',
+        recipient: 'peer1',
+        timestamp: Date.now(),
+        payload: { test: 'data' },
+      };
+
+      await expect(a2a['isValidMessage'](invalidMessage)).toBe(false);
     });
   });
 });

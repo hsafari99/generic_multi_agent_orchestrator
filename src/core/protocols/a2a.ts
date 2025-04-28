@@ -28,6 +28,23 @@ export interface A2AMessage {
   metadata?: Record<string, any>;
 }
 
+export interface SecurityMetrics {
+  encryptionFailures: number;
+  decryptionFailures: number;
+  rateLimitViolations: number;
+  compressionFailures: number;
+  invalidMessages: number;
+  lastUpdate: number;
+}
+
+export interface SecurityEvent {
+  type: 'encryption' | 'decryption' | 'rate_limit' | 'compression' | 'validation';
+  severity: 'low' | 'medium' | 'high';
+  message: string;
+  timestamp: number;
+  metadata?: Record<string, any>;
+}
+
 export interface A2AProtocolConfig {
   postgres: PostgresClient;
   redis: RedisClient;
@@ -53,6 +70,14 @@ export class A2AProtocol extends EventEmitter {
   private loadBalancing?: LoadBalancingConfig;
   private peerLoads: Map<string, PeerLoad> = new Map();
   private currentPeerIndex: number = 0;
+  private securityMetrics: SecurityMetrics = {
+    encryptionFailures: 0,
+    decryptionFailures: 0,
+    rateLimitViolations: 0,
+    compressionFailures: 0,
+    invalidMessages: 0,
+    lastUpdate: Date.now(),
+  };
 
   constructor(config: A2AProtocolConfig) {
     super();
@@ -119,9 +144,38 @@ export class A2AProtocol extends EventEmitter {
         FOREIGN KEY (agent_id) REFERENCES a2a_peers(agent_id)
       );
 
+      CREATE TABLE IF NOT EXISTS a2a_security_metrics (
+        agent_id VARCHAR(255) PRIMARY KEY,
+        encryption_failures INTEGER NOT NULL DEFAULT 0,
+        decryption_failures INTEGER NOT NULL DEFAULT 0,
+        rate_limit_violations INTEGER NOT NULL DEFAULT 0,
+        compression_failures INTEGER NOT NULL DEFAULT 0,
+        invalid_messages INTEGER NOT NULL DEFAULT 0,
+        last_update TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES a2a_peers(agent_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS a2a_security_events (
+        id VARCHAR(255) PRIMARY KEY,
+        agent_id VARCHAR(255) NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        severity VARCHAR(10) NOT NULL,
+        message TEXT NOT NULL,
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES a2a_peers(agent_id)
+      );
+
       CREATE INDEX IF NOT EXISTS idx_a2a_messages_sender ON a2a_messages(sender);
       CREATE INDEX IF NOT EXISTS idx_a2a_messages_recipient ON a2a_messages(recipient);
       CREATE INDEX IF NOT EXISTS idx_a2a_messages_timestamp ON a2a_messages(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_a2a_security_events_agent_id ON a2a_security_events(agent_id);
+      CREATE INDEX IF NOT EXISTS idx_a2a_security_events_type ON a2a_security_events(type);
+      CREATE INDEX IF NOT EXISTS idx_a2a_security_events_severity ON a2a_security_events(severity);
+      CREATE INDEX IF NOT EXISTS idx_a2a_security_events_timestamp ON a2a_security_events(timestamp);
     `);
   }
 
@@ -311,11 +365,216 @@ export class A2AProtocol extends EventEmitter {
     }
   }
 
+  private async logSecurityEvent(event: SecurityEvent): Promise<void> {
+    try {
+      await this.postgres.query(
+        `
+        INSERT INTO a2a_security_events (
+          id, agent_id, type, severity, message, timestamp, metadata
+        ) VALUES (
+          $1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6
+        )
+        `,
+        [
+          crypto.randomUUID(),
+          this.agentId,
+          event.type,
+          event.severity,
+          event.message,
+          JSON.stringify(event.metadata || {}),
+        ]
+      );
+
+      // Update security metrics
+      switch (event.type) {
+        case 'encryption':
+          this.securityMetrics.encryptionFailures++;
+          break;
+        case 'decryption':
+          this.securityMetrics.decryptionFailures++;
+          break;
+        case 'rate_limit':
+          this.securityMetrics.rateLimitViolations++;
+          break;
+        case 'compression':
+          this.securityMetrics.compressionFailures++;
+          break;
+        case 'validation':
+          this.securityMetrics.invalidMessages++;
+          break;
+      }
+
+      this.securityMetrics.lastUpdate = Date.now();
+
+      // Update metrics in database
+      await this.postgres.query(
+        `
+        INSERT INTO a2a_security_metrics (
+          agent_id,
+          encryption_failures,
+          decryption_failures,
+          rate_limit_violations,
+          compression_failures,
+          invalid_messages,
+          last_update
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (agent_id) DO UPDATE SET
+          encryption_failures = $2,
+          decryption_failures = $3,
+          rate_limit_violations = $4,
+          compression_failures = $5,
+          invalid_messages = $6,
+          last_update = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [
+          this.agentId,
+          this.securityMetrics.encryptionFailures,
+          this.securityMetrics.decryptionFailures,
+          this.securityMetrics.rateLimitViolations,
+          this.securityMetrics.compressionFailures,
+          this.securityMetrics.invalidMessages,
+        ]
+      );
+
+      this.logger.warn('Security event logged', {
+        type: event.type,
+        severity: event.severity,
+        message: event.message,
+        metadata: event.metadata,
+      });
+    } catch (error) {
+      this.logger.error('Error logging security event', error);
+    }
+  }
+
+  async getSecurityMetrics(): Promise<SecurityMetrics> {
+    try {
+      const result = await this.postgres.query<
+        {
+          encryption_failures: number;
+          decryption_failures: number;
+          rate_limit_violations: number;
+          compression_failures: number;
+          invalid_messages: number;
+          last_update: Date;
+        }[]
+      >(
+        `
+        SELECT * FROM a2a_security_metrics WHERE agent_id = $1
+        `,
+        [this.agentId]
+      );
+
+      if (result.length > 0) {
+        this.securityMetrics = {
+          encryptionFailures: result[0].encryption_failures,
+          decryptionFailures: result[0].decryption_failures,
+          rateLimitViolations: result[0].rate_limit_violations,
+          compressionFailures: result[0].compression_failures,
+          invalidMessages: result[0].invalid_messages,
+          lastUpdate: result[0].last_update.getTime(),
+        };
+      }
+
+      return this.securityMetrics;
+    } catch (error) {
+      this.logger.error('Error getting security metrics', error);
+      throw error;
+    }
+  }
+
+  async getSecurityEvents(
+    options: {
+      type?: SecurityEvent['type'];
+      severity?: SecurityEvent['severity'];
+      startTime?: number;
+      endTime?: number;
+      limit?: number;
+    } = {}
+  ): Promise<SecurityEvent[]> {
+    try {
+      const conditions: string[] = ['agent_id = $1'];
+      const params: any[] = [this.agentId];
+      let paramIndex = 2;
+
+      if (options.type) {
+        conditions.push(`type = $${paramIndex}`);
+        params.push(options.type);
+        paramIndex++;
+      }
+
+      if (options.severity) {
+        conditions.push(`severity = $${paramIndex}`);
+        params.push(options.severity);
+        paramIndex++;
+      }
+
+      if (options.startTime) {
+        conditions.push(`timestamp >= $${paramIndex}`);
+        params.push(new Date(options.startTime));
+        paramIndex++;
+      }
+
+      if (options.endTime) {
+        conditions.push(`timestamp <= $${paramIndex}`);
+        params.push(new Date(options.endTime));
+        paramIndex++;
+      }
+
+      const limitClause = options.limit ? `LIMIT ${options.limit}` : '';
+
+      const result = await this.postgres.query<
+        {
+          id: string;
+          type: SecurityEvent['type'];
+          severity: SecurityEvent['severity'];
+          message: string;
+          timestamp: Date;
+          metadata: any;
+        }[]
+      >(
+        `
+        SELECT * FROM a2a_security_events
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY timestamp DESC
+        ${limitClause}
+        `,
+        params
+      );
+
+      return result.map(row => ({
+        type: row.type,
+        severity: row.severity,
+        message: row.message,
+        timestamp: row.timestamp.getTime(),
+        metadata: row.metadata,
+      }));
+    } catch (error) {
+      this.logger.error('Error getting security events', error);
+      throw error;
+    }
+  }
+
   async sendMessage(message: Omit<A2AMessage, 'id' | 'timestamp'>): Promise<void> {
     if (this.rateLimiter) {
       const canSend = await this.rateLimiter.acquireToken();
       if (!canSend) {
         const timeUntilNext = this.rateLimiter.getTimeUntilNextToken();
+        await this.logSecurityEvent({
+          type: 'rate_limit',
+          severity: 'medium',
+          message: `Rate limit exceeded. Try again in ${timeUntilNext}ms`,
+          timestamp: Date.now(),
+          metadata: {
+            timeUntilNext,
+            messageType: message.type,
+            sender: message.sender,
+            recipient: message.recipient,
+          },
+        });
         throw new Error(`Rate limit exceeded. Try again in ${timeUntilNext}ms`);
       }
     }
@@ -342,9 +601,24 @@ export class A2AProtocol extends EventEmitter {
     await this.updatePeerLoad(selectedPeer);
 
     // Compress message if compression is enabled
-    let messageToStore = this.encryption
-      ? this.encryption.encrypt(JSON.stringify(fullMessage))
-      : fullMessage.payload;
+    let messageToStore = fullMessage.payload;
+    try {
+      if (this.encryption) {
+        messageToStore = this.encryption.encrypt(JSON.stringify(fullMessage));
+      }
+    } catch (error) {
+      await this.logSecurityEvent({
+        type: 'encryption',
+        severity: 'high',
+        message: 'Failed to encrypt message',
+        timestamp: Date.now(),
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+          messageId: fullMessage.id,
+        },
+      });
+      throw error;
+    }
 
     this.logger.debug('Message after encryption', {
       messageId: fullMessage.id,
@@ -352,16 +626,30 @@ export class A2AProtocol extends EventEmitter {
       messageToStore,
     });
 
-    if (this.compression) {
-      messageToStore = await this.compression.compress(JSON.stringify(messageToStore));
-    } else {
-      // Wrap in compression object for consistency
-      messageToStore = {
-        compressed: false,
-        data: JSON.stringify(messageToStore),
-        originalSize: Buffer.byteLength(JSON.stringify(messageToStore), 'utf8'),
-        compressedSize: Buffer.byteLength(JSON.stringify(messageToStore), 'utf8'),
-      };
+    try {
+      if (this.compression) {
+        messageToStore = await this.compression.compress(JSON.stringify(messageToStore));
+      } else {
+        // Wrap in compression object for consistency
+        messageToStore = {
+          compressed: false,
+          data: JSON.stringify(messageToStore),
+          originalSize: Buffer.byteLength(JSON.stringify(messageToStore), 'utf8'),
+          compressedSize: Buffer.byteLength(JSON.stringify(messageToStore), 'utf8'),
+        };
+      }
+    } catch (error) {
+      await this.logSecurityEvent({
+        type: 'compression',
+        severity: 'medium',
+        message: 'Failed to compress message',
+        timestamp: Date.now(),
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+          messageId: fullMessage.id,
+        },
+      });
+      throw error;
     }
 
     this.logger.debug('Message after compression', {
@@ -418,13 +706,42 @@ export class A2AProtocol extends EventEmitter {
 
       if (cachedMessage) {
         const message = JSON.parse(cachedMessage);
-        let decryptedMessage =
-          this.encryption && this.isEncryptedMessage(message)
-            ? JSON.parse(this.encryption.decrypt(message))
-            : message;
+        let decryptedMessage = message;
 
-        if (this.compression && this.isCompressedMessage(decryptedMessage)) {
-          decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
+        try {
+          if (this.encryption && this.isEncryptedMessage(message)) {
+            decryptedMessage = JSON.parse(this.encryption.decrypt(message));
+          }
+        } catch (error) {
+          await this.logSecurityEvent({
+            type: 'decryption',
+            severity: 'high',
+            message: 'Failed to decrypt message',
+            timestamp: Date.now(),
+            metadata: {
+              error: error instanceof Error ? error.message : String(error),
+              messageId,
+            },
+          });
+          throw error;
+        }
+
+        try {
+          if (this.compression && this.isCompressedMessage(decryptedMessage)) {
+            decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
+          }
+        } catch (error) {
+          await this.logSecurityEvent({
+            type: 'compression',
+            severity: 'medium',
+            message: 'Failed to decompress message',
+            timestamp: Date.now(),
+            metadata: {
+              error: error instanceof Error ? error.message : String(error),
+              messageId,
+            },
+          });
+          throw error;
         }
 
         return decryptedMessage;
@@ -453,13 +770,57 @@ export class A2AProtocol extends EventEmitter {
       }
 
       const message = result[0].payload;
-      let decryptedMessage =
-        this.encryption && this.isEncryptedMessage(message)
-          ? JSON.parse(this.encryption.decrypt(message))
-          : message;
+      let decryptedMessage = message;
 
-      if (this.compression && this.isCompressedMessage(decryptedMessage)) {
-        decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
+      try {
+        if (this.encryption && this.isEncryptedMessage(message)) {
+          decryptedMessage = JSON.parse(this.encryption.decrypt(message));
+        }
+      } catch (error) {
+        await this.logSecurityEvent({
+          type: 'decryption',
+          severity: 'high',
+          message: 'Failed to decrypt message',
+          timestamp: Date.now(),
+          metadata: {
+            error: error instanceof Error ? error.message : String(error),
+            messageId,
+          },
+        });
+        throw error;
+      }
+
+      try {
+        if (this.compression && this.isCompressedMessage(decryptedMessage)) {
+          decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
+        }
+      } catch (error) {
+        await this.logSecurityEvent({
+          type: 'compression',
+          severity: 'medium',
+          message: 'Failed to decompress message',
+          timestamp: Date.now(),
+          metadata: {
+            error: error instanceof Error ? error.message : String(error),
+            messageId,
+          },
+        });
+        throw error;
+      }
+
+      // Validate message structure
+      if (!this.isValidMessage(decryptedMessage)) {
+        await this.logSecurityEvent({
+          type: 'validation',
+          severity: 'high',
+          message: 'Invalid message structure',
+          timestamp: Date.now(),
+          metadata: {
+            messageId,
+            message: decryptedMessage,
+          },
+        });
+        throw new Error('Invalid message structure');
       }
 
       // Reconstruct the complete message object
@@ -508,6 +869,18 @@ export class A2AProtocol extends EventEmitter {
       'data' in message &&
       'originalSize' in message &&
       'compressedSize' in message
+    );
+  }
+
+  private isValidMessage(message: any): message is A2AMessage {
+    return (
+      typeof message === 'object' &&
+      typeof message.id === 'string' &&
+      ['request', 'response', 'notification'].includes(message.type) &&
+      typeof message.sender === 'string' &&
+      typeof message.recipient === 'string' &&
+      typeof message.timestamp === 'number' &&
+      typeof message.payload === 'object'
     );
   }
 
