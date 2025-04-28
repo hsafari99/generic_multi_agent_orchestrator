@@ -195,11 +195,36 @@
 **Priority**: P0
 **Dependencies**: 3.2.2
 **Checkpoints**:
-- [ ] Message routing implemented
-- [ ] Pub/sub system working
-- [ ] Message validation complete
+- [x] Message routing implemented
+  - Route messages to specific agents
+  - Handle broadcast messages
+  - Support topic-based routing
+  - Handle message priorities
+  - Implement message filtering
+- [x] Pub/sub system working
+  - Agents can subscribe to topics
+  - Messages can be published to topics
+  - Support wildcard subscriptions
+  - Handle subscription management
+  - Implement delivery guarantees
+- [x] Message validation complete
+  - Validate message format
+  - Validate message content
+  - Check message permissions
+  - Validate message size
+  - Handle validation errors
 - [ ] Message queuing implemented
+  - Store messages in Redis
+  - Handle message persistence
+  - Support message prioritization
+  - Implement retry mechanisms
+  - Handle dead letter queues
 - [ ] Message monitoring in place
+  - Track message flow
+  - Monitor queue sizes
+  - Track processing times
+  - Monitor error rates
+  - Implement health checks
 
 ##### 3.2.4 Communication Storage (1 day)
 **Priority**: P0

@@ -225,15 +225,19 @@ export interface Example {
  */
 export interface MessageMetadata {
   /** Priority of the message (higher number = higher priority) */
-  priority: number;
+  priority?: number;
   /** Time-to-live in milliseconds (optional) */
   ttl?: number;
   /** List of tags associated with the message (optional) */
   tags?: string[];
   /** Whether the message requires acknowledgment */
-  requiresAck: boolean;
+  requiresAck?: boolean;
   /** WebSocket connection ID (optional) */
   connectionId?: string;
+  /** Topic of the message (optional) */
+  topic?: string;
+  /** Additional metadata */
+  [key: string]: any;
 }
 
 /**

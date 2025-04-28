@@ -29,6 +29,9 @@ export enum MessageType {
   // A2A communication
   A2A_MESSAGE = 'a2a_message',
   A2A_STATE_SYNC = 'a2a_state_sync',
+
+  // New task type
+  TASK = 'task',
 }
 
 /**
