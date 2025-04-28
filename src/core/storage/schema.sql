@@ -44,12 +44,33 @@ CREATE TABLE message_metadata (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Message history table for tracking message history
+CREATE TABLE message_history (
+    id SERIAL PRIMARY KEY,
+    message_id UUID NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    sender VARCHAR(255) NOT NULL,
+    receiver VARCHAR(255) NOT NULL,
+    payload JSONB NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    metadata JSONB,
+    status VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for better query performance
 CREATE INDEX idx_messages_status ON messages(status);
 CREATE INDEX idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX idx_messages_sender ON messages(sender);
 CREATE INDEX idx_messages_receiver ON messages(receiver);
 CREATE INDEX idx_message_metadata_priority ON message_metadata(priority);
+
+-- Indexes for message history
+CREATE INDEX idx_message_history_timestamp ON message_history(timestamp);
+CREATE INDEX idx_message_history_sender ON message_history(sender);
+CREATE INDEX idx_message_history_receiver ON message_history(receiver);
+CREATE INDEX idx_message_history_type ON message_history(type);
+CREATE INDEX idx_message_history_created_at ON message_history(created_at);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
