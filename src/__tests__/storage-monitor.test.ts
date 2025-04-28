@@ -54,7 +54,8 @@ describe('StorageMonitor', () => {
         error_count: 2,
         avg_query_time: 0.5,
       };
-      const mockRedisInfo = 'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
+      const mockRedisInfo =
+        'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
       const mockRedisKeys = ['key1', 'key2'];
       const mockQueueMetrics = {
         queue_size: 10,
@@ -101,7 +102,8 @@ describe('StorageMonitor', () => {
         error_count: 2,
         avg_query_time: 0.5,
       };
-      const mockRedisInfo = 'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
+      const mockRedisInfo =
+        'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
       const mockRedisKeys = ['key1', 'key2'];
       const mockQueueMetrics = {
         queue_size: 10,
@@ -149,7 +151,8 @@ describe('StorageMonitor', () => {
         error_count: 2,
         avg_query_time: 0.5,
       };
-      const mockRedisInfo = 'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
+      const mockRedisInfo =
+        'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
       const mockRedisKeys = ['key1', 'key2'];
       const mockQueueMetrics = {
         queue_size: 10,
@@ -196,7 +199,8 @@ describe('StorageMonitor', () => {
         error_count: 2,
         avg_query_time: 0.5,
       };
-      const mockRedisInfo = 'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
+      const mockRedisInfo =
+        'connected_clients:10\nused_memory:1000\nkeyspace_hits:500\nkeyspace_misses:50\ntotal_commands_processed:1000';
       const mockRedisKeys = ['key1', 'key2'];
       const mockQueueMetrics = {
         queue_size: 10,
