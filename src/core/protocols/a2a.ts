@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { Logger } from '../logging/logger';
 import { PostgresClient } from '../storage/postgres';
 import { RedisClient } from '../cache/client';
+import { MessageEncryption, EncryptedMessage } from '../security/encryption';
 
 export interface A2AMessage {
   id: string;
@@ -18,6 +19,7 @@ export interface A2AProtocolConfig {
   redis: RedisClient;
   agentId: string;
   checkInterval?: number;
+  encryptionKey?: string;
 }
 
 export class A2AProtocol extends EventEmitter {
@@ -28,6 +30,7 @@ export class A2AProtocol extends EventEmitter {
   private checkInterval: number;
   private intervalId?: NodeJS.Timeout;
   private peers: Map<string, boolean> = new Map();
+  private encryption?: MessageEncryption;
 
   constructor(config: A2AProtocolConfig) {
     super();
@@ -36,6 +39,10 @@ export class A2AProtocol extends EventEmitter {
     this.logger = Logger.getInstance();
     this.agentId = config.agentId;
     this.checkInterval = config.checkInterval || 60000; // 1 minute default
+
+    if (config.encryptionKey) {
+      this.encryption = new MessageEncryption(config.encryptionKey);
+    }
   }
 
   async initialize(): Promise<void> {
@@ -174,6 +181,11 @@ export class A2AProtocol extends EventEmitter {
       recipient: fullMessage.recipient,
     });
 
+    // Encrypt message if encryption is enabled
+    const messageToStore = this.encryption
+      ? this.encryption.encrypt(JSON.stringify(fullMessage))
+      : fullMessage.payload;
+
     // Store message in database
     await this.postgres.query(
       `
@@ -186,7 +198,7 @@ export class A2AProtocol extends EventEmitter {
         fullMessage.sender,
         fullMessage.recipient,
         new Date(fullMessage.timestamp),
-        JSON.stringify(fullMessage.payload),
+        JSON.stringify(messageToStore),
         JSON.stringify(fullMessage.metadata || {}),
       ]
     );
@@ -194,7 +206,7 @@ export class A2AProtocol extends EventEmitter {
     // Cache message for quick retrieval
     await this.redis.getClient().set(
       `a2a:message:${fullMessage.id}`,
-      JSON.stringify(fullMessage),
+      JSON.stringify(messageToStore),
       { EX: 3600 } // 1 hour cache
     );
 
@@ -214,7 +226,10 @@ export class A2AProtocol extends EventEmitter {
       }
 
       if (cachedMessage) {
-        return JSON.parse(cachedMessage);
+        const message = JSON.parse(cachedMessage);
+        return this.encryption && this.isEncryptedMessage(message)
+          ? JSON.parse(this.encryption.decrypt(message))
+          : message;
       }
 
       // Try database
@@ -239,13 +254,20 @@ export class A2AProtocol extends EventEmitter {
         return null;
       }
 
-      const message: A2AMessage = {
+      const message = result[0].payload;
+      const decryptedMessage =
+        this.encryption && this.isEncryptedMessage(message)
+          ? JSON.parse(this.encryption.decrypt(message))
+          : message;
+
+      // Reconstruct the complete message object
+      const reconstructedMessage: A2AMessage = {
         id: result[0].id,
         type: result[0].type as 'request' | 'response' | 'notification',
         sender: result[0].sender,
         recipient: result[0].recipient,
         timestamp: result[0].timestamp.getTime(),
-        payload: result[0].payload,
+        payload: decryptedMessage.payload,
         metadata: result[0].metadata,
       };
 
@@ -260,12 +282,21 @@ export class A2AProtocol extends EventEmitter {
         this.logger.warn('Error caching message', error);
       }
 
-      return message;
+      return reconstructedMessage;
     } catch (error) {
       this.logger.error('Error receiving message', error);
       this.emit('error', error);
       throw error; // Re-throw the error to be caught by the test
     }
+  }
+
+  private isEncryptedMessage(message: any): message is EncryptedMessage {
+    return (
+      typeof message === 'object' &&
+      'encryptedData' in message &&
+      'iv' in message &&
+      'algorithm' in message
+    );
   }
 
   async listPeers(): Promise<string[]> {

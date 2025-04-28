@@ -2,6 +2,7 @@ import { A2AProtocol, A2AMessage } from '../core/protocols/a2a';
 import { PostgresClient } from '../core/storage/postgres';
 import { RedisClient } from '../core/cache/client';
 import { Logger } from '../core/logging/logger';
+import { MessageEncryption } from '../core/security/encryption';
 
 jest.mock('../core/storage/postgres');
 jest.mock('../core/cache/client');
@@ -293,6 +294,93 @@ describe('A2AProtocol', () => {
           expect.arrayContaining([type])
         );
       }
+    });
+
+    describe('encryption', () => {
+      let encryptedProtocol: A2AProtocol;
+      const encryptionKey = MessageEncryption.generateKey();
+
+      beforeEach(() => {
+        encryptedProtocol = new A2AProtocol({
+          postgres: mockPostgres,
+          redis: mockRedis,
+          agentId: 'test-agent',
+          checkInterval: 1000,
+          encryptionKey,
+        });
+      });
+
+      it('should encrypt messages when sending', async () => {
+        const message: Omit<A2AMessage, 'id' | 'timestamp'> = {
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          payload: { action: 'test' },
+          metadata: { priority: 'high' },
+        };
+
+        mockPostgres.query
+          .mockResolvedValueOnce([]) // createTables
+          .mockResolvedValueOnce([]) // loadPeers
+          .mockResolvedValueOnce([]); // insert message
+
+        await encryptedProtocol.initialize();
+        await encryptedProtocol.sendMessage(message);
+
+        // Verify message was encrypted
+        expect(mockPostgres.query).toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO a2a_messages'),
+          expect.arrayContaining([
+            expect.any(String), // id
+            'request',
+            'test-agent',
+            'peer1',
+            expect.any(Date),
+            expect.stringMatching(
+              /{"encryptedData":".*","iv":".*","algorithm":"aes-256-gcm","authTag":".*"}/
+            ),
+            JSON.stringify({ priority: 'high' }),
+          ])
+        );
+      });
+
+      it('should decrypt messages when receiving', async () => {
+        const messageId = 'test-message-id';
+        const originalMessage: A2AMessage = {
+          id: messageId,
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'peer1',
+          timestamp: Date.now(),
+          payload: { action: 'test' },
+          metadata: { priority: 'high' },
+        };
+
+        const encryption = new MessageEncryption(encryptionKey);
+        const encryptedMessage = encryption.encrypt(JSON.stringify(originalMessage));
+
+        (mockRedis.getClient().get as jest.Mock).mockResolvedValueOnce(
+          JSON.stringify(encryptedMessage)
+        );
+
+        const message = await encryptedProtocol.receiveMessage(messageId);
+        expect(message).toEqual(originalMessage);
+      });
+
+      it('should handle encryption errors', async () => {
+        const messageId = 'test-message-id';
+        const invalidMessage = {
+          encryptedData: 'invalid',
+          iv: 'invalid',
+          algorithm: 'aes-256-gcm',
+        };
+
+        (mockRedis.getClient().get as jest.Mock).mockResolvedValueOnce(
+          JSON.stringify(invalidMessage)
+        );
+
+        await expect(encryptedProtocol.receiveMessage(messageId)).rejects.toThrow();
+      });
     });
   });
 });
