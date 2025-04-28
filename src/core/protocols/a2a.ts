@@ -6,6 +6,18 @@ import { MessageEncryption, EncryptedMessage } from '../security/encryption';
 import { RateLimiter, RateLimitConfig } from '../security/rate-limiter';
 import { MessageCompression, CompressionConfig, CompressedMessage } from '../security/compression';
 
+export interface LoadBalancingConfig {
+  strategy: 'round-robin' | 'least-loaded' | 'weighted';
+  weights?: Record<string, number>;
+  checkInterval?: number;
+}
+
+export interface PeerLoad {
+  messageCount: number;
+  lastUpdate: number;
+  weight: number;
+}
+
 export interface A2AMessage {
   id: string;
   type: 'request' | 'response' | 'notification';
@@ -24,6 +36,7 @@ export interface A2AProtocolConfig {
   encryptionKey?: string;
   rateLimit?: RateLimitConfig;
   compression?: CompressionConfig;
+  loadBalancing?: LoadBalancingConfig;
 }
 
 export class A2AProtocol extends EventEmitter {
@@ -37,6 +50,9 @@ export class A2AProtocol extends EventEmitter {
   private encryption?: MessageEncryption;
   private rateLimiter?: RateLimiter;
   private compression?: MessageCompression;
+  private loadBalancing?: LoadBalancingConfig;
+  private peerLoads: Map<string, PeerLoad> = new Map();
+  private currentPeerIndex: number = 0;
 
   constructor(config: A2AProtocolConfig) {
     super();
@@ -45,6 +61,7 @@ export class A2AProtocol extends EventEmitter {
     this.logger = Logger.getInstance();
     this.agentId = config.agentId;
     this.checkInterval = config.checkInterval || 60000; // 1 minute default
+    this.loadBalancing = config.loadBalancing;
 
     if (config.encryptionKey) {
       this.encryption = new MessageEncryption(config.encryptionKey);
@@ -92,6 +109,16 @@ export class A2AProtocol extends EventEmitter {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS a2a_peer_load (
+        agent_id VARCHAR(255) PRIMARY KEY,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        last_update TIMESTAMP WITH TIME ZONE NOT NULL,
+        weight FLOAT NOT NULL DEFAULT 1.0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES a2a_peers(agent_id)
+      );
+
       CREATE INDEX IF NOT EXISTS idx_a2a_messages_sender ON a2a_messages(sender);
       CREATE INDEX IF NOT EXISTS idx_a2a_messages_recipient ON a2a_messages(recipient);
       CREATE INDEX IF NOT EXISTS idx_a2a_messages_timestamp ON a2a_messages(timestamp);
@@ -100,11 +127,112 @@ export class A2AProtocol extends EventEmitter {
 
   private async loadPeers(): Promise<void> {
     const result = await this.postgres.query<{ agent_id: string; status: string }[]>(`
-      SELECT agent_id, status FROM a2a_peers
+      SELECT * FROM a2a_peers
     `);
 
     for (const row of result) {
       this.peers.set(row.agent_id, row.status === 'active');
+
+      // Load peer load metrics
+      const loadResult = await this.postgres.query<
+        {
+          agent_id: string;
+          message_count: number;
+          last_update: Date;
+          weight: number;
+        }[]
+      >(
+        `
+        SELECT * FROM a2a_peer_load WHERE agent_id = $1
+        `,
+        [row.agent_id]
+      );
+
+      if (loadResult.length > 0) {
+        this.peerLoads.set(row.agent_id, {
+          messageCount: loadResult[0].message_count,
+          lastUpdate: loadResult[0].last_update.getTime(),
+          weight: loadResult[0].weight,
+        });
+      } else {
+        // Initialize with default values
+        this.peerLoads.set(row.agent_id, {
+          messageCount: 0,
+          lastUpdate: Date.now(),
+          weight: this.loadBalancing?.weights?.[row.agent_id] || 1.0,
+        });
+      }
+    }
+  }
+
+  private async updatePeerLoad(peerId: string): Promise<void> {
+    const currentLoad = this.peerLoads.get(peerId) || {
+      messageCount: 0,
+      lastUpdate: Date.now(),
+      weight: this.loadBalancing?.weights?.[peerId] || 1.0,
+    };
+
+    currentLoad.messageCount++;
+    currentLoad.lastUpdate = Date.now();
+
+    await this.postgres.query(
+      `
+      INSERT INTO a2a_peer_load (agent_id, message_count, last_update, weight)
+      VALUES ($1, $2, CURRENT_TIMESTAMP, $3)
+      ON CONFLICT (agent_id) DO UPDATE SET
+        message_count = $2,
+        last_update = CURRENT_TIMESTAMP,
+        weight = $3,
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [peerId, currentLoad.messageCount, currentLoad.weight]
+    );
+
+    this.peerLoads.set(peerId, currentLoad);
+  }
+
+  private selectPeer(recipient: string): string {
+    if (!this.loadBalancing) {
+      return recipient;
+    }
+
+    const activePeers = Array.from(this.peers.entries())
+      .filter(([, isActive]) => isActive)
+      .map(([id]) => id);
+
+    if (activePeers.length === 0) {
+      return recipient;
+    }
+
+    switch (this.loadBalancing.strategy) {
+      case 'round-robin':
+        this.currentPeerIndex = (this.currentPeerIndex + 1) % activePeers.length;
+        return activePeers[this.currentPeerIndex];
+
+      case 'least-loaded':
+        return activePeers.reduce((min, current) => {
+          const minLoad = this.peerLoads.get(min)?.messageCount || 0;
+          const currentLoad = this.peerLoads.get(current)?.messageCount || 0;
+          return currentLoad < minLoad ? current : min;
+        });
+
+      case 'weighted':
+        const totalWeight = activePeers.reduce((sum, peer) => {
+          return sum + (this.peerLoads.get(peer)?.weight || 1.0);
+        }, 0);
+
+        let random = Math.random() * totalWeight;
+        for (const peer of activePeers) {
+          const weight = this.peerLoads.get(peer)?.weight || 1.0;
+          random -= weight;
+          if (random <= 0) {
+            return peer;
+          }
+        }
+        return activePeers[0];
+
+      default:
+        return recipient;
     }
   }
 
@@ -198,6 +326,10 @@ export class A2AProtocol extends EventEmitter {
       timestamp: Date.now(),
     };
 
+    // Apply load balancing if configured
+    const selectedPeer = this.selectPeer(message.recipient);
+    fullMessage.recipient = selectedPeer;
+
     this.logger.info('Sending A2A message', {
       messageId: fullMessage.id,
       recipient: fullMessage.recipient,
@@ -205,6 +337,9 @@ export class A2AProtocol extends EventEmitter {
       payload: fullMessage.payload,
       metadata: fullMessage.metadata,
     });
+
+    // Update peer load metrics
+    await this.updatePeerLoad(selectedPeer);
 
     // Compress message if compression is enabled
     let messageToStore = this.encryption

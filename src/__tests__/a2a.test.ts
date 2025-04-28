@@ -427,13 +427,15 @@ describe('A2AProtocol', () => {
           .mockResolvedValueOnce([]) // createTables
           .mockResolvedValueOnce([]) // loadPeers
           .mockResolvedValueOnce([]) // first message
-          .mockResolvedValueOnce([]); // second message
+          .mockResolvedValueOnce([]) // update peer load
+          .mockResolvedValueOnce([]) // second message
+          .mockResolvedValueOnce([]); // update peer load
 
         await rateLimitedProtocol.initialize();
         await rateLimitedProtocol.sendMessage(message);
         await rateLimitedProtocol.sendMessage(message);
 
-        expect(mockPostgres.query).toHaveBeenCalledTimes(4);
+        expect(mockPostgres.query).toHaveBeenCalledTimes(6);
       });
 
       it('should reject messages exceeding rate limit', async () => {
@@ -472,7 +474,10 @@ describe('A2AProtocol', () => {
           .mockResolvedValueOnce([]) // loadPeers
           .mockResolvedValueOnce([]) // first message
           .mockResolvedValueOnce([]) // second message
-          .mockResolvedValueOnce([]); // third message after interval
+          .mockResolvedValueOnce([]) // third message after interval
+          .mockResolvedValueOnce([]) // update peer load
+          .mockResolvedValueOnce([]) // update peer load
+          .mockResolvedValueOnce([]); // update peer load
 
         await rateLimitedProtocol.initialize();
         await rateLimitedProtocol.sendMessage(message);
@@ -482,7 +487,7 @@ describe('A2AProtocol', () => {
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         await rateLimitedProtocol.sendMessage(message);
-        expect(mockPostgres.query).toHaveBeenCalledTimes(5);
+        expect(mockPostgres.query).toHaveBeenCalledTimes(8);
       });
     });
 
@@ -589,6 +594,324 @@ describe('A2AProtocol', () => {
         const message = await compressedProtocol.receiveMessage(messageId);
         expect(message).toEqual(originalMessage);
       });
+    });
+  });
+
+  describe('A2A Protocol Load Balancing', () => {
+    let a2a: A2AProtocol;
+
+    beforeEach(async () => {
+      // Mock database responses for initialization
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]); // loadPeers
+
+      a2a = new A2AProtocol({
+        postgres: mockPostgres,
+        redis: mockRedis,
+        agentId: 'test-agent',
+        checkInterval: 1000,
+        loadBalancing: {
+          strategy: 'round-robin',
+          weights: {
+            peer1: 2.0,
+            peer2: 1.0,
+            peer3: 1.5,
+          },
+        },
+      });
+      await a2a.initialize();
+    });
+
+    afterEach(async () => {
+      await a2a.stop();
+    });
+
+    it('should create peer load table during initialization', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([{ exists: true }]); // table existence check
+
+      await a2a.initialize();
+
+      // Mock the table existence check
+      mockPostgres.query.mockResolvedValueOnce([{ exists: true }]);
+
+      const result = await mockPostgres.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_name = 'a2a_peer_load'
+        );
+      `);
+
+      expect(result[0].exists).toBe(true);
+    });
+
+    it('should update peer load metrics when sending messages', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert peers
+        .mockResolvedValueOnce([]) // first message
+        .mockResolvedValueOnce([]) // second message
+        .mockResolvedValueOnce([
+          { agent_id: 'peer1', message_count: 1, weight: 2.0 },
+          { agent_id: 'peer2', message_count: 1, weight: 1.0 },
+          { agent_id: 'peer3', message_count: 0, weight: 1.5 },
+        ]); // load metrics
+
+      // Add test peers
+      await mockPostgres.query(`
+        INSERT INTO a2a_peers (agent_id, last_seen, status)
+        VALUES 
+          ('peer1', CURRENT_TIMESTAMP, 'active'),
+          ('peer2', CURRENT_TIMESTAMP, 'active'),
+          ('peer3', CURRENT_TIMESTAMP, 'active')
+        ON CONFLICT (agent_id) DO UPDATE SET
+          last_seen = CURRENT_TIMESTAMP,
+          status = 'active';
+      `);
+
+      // Send messages to different peers
+      await a2a.sendMessage({
+        type: 'request',
+        sender: 'test-agent',
+        recipient: 'peer1',
+        payload: { test: 'data' },
+      });
+
+      await a2a.sendMessage({
+        type: 'request',
+        sender: 'test-agent',
+        recipient: 'peer2',
+        payload: { test: 'data' },
+      });
+
+      // Mock the final load metrics query
+      mockPostgres.query.mockResolvedValueOnce([
+        { agent_id: 'peer1', message_count: 1, weight: 2.0 },
+        { agent_id: 'peer2', message_count: 1, weight: 1.0 },
+        { agent_id: 'peer3', message_count: 0, weight: 1.5 },
+      ]);
+
+      // Check load metrics
+      const loadResult = await mockPostgres.query(`
+        SELECT agent_id, message_count, weight
+        FROM a2a_peer_load
+        WHERE agent_id IN ('peer1', 'peer2', 'peer3')
+        ORDER BY agent_id;
+      `);
+
+      expect(loadResult).toHaveLength(3);
+      expect(loadResult[0].message_count).toBe(1); // peer1
+      expect(loadResult[1].message_count).toBe(1); // peer2
+      expect(loadResult[2].message_count).toBe(0); // peer3
+    });
+
+    it('should select peers based on round-robin strategy', async () => {
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert peers
+        .mockResolvedValueOnce([]) // first message
+        .mockResolvedValueOnce([]) // second message
+        .mockResolvedValueOnce([]) // third message
+        .mockResolvedValueOnce([]) // fourth message
+        .mockResolvedValueOnce([]) // fifth message
+        .mockResolvedValueOnce([]); // sixth message
+
+      // Add test peers
+      await mockPostgres.query(`
+        INSERT INTO a2a_peers (agent_id, last_seen, status)
+        VALUES 
+          ('peer1', CURRENT_TIMESTAMP, 'active'),
+          ('peer2', CURRENT_TIMESTAMP, 'active'),
+          ('peer3', CURRENT_TIMESTAMP, 'active')
+        ON CONFLICT (agent_id) DO UPDATE SET
+          last_seen = CURRENT_TIMESTAMP,
+          status = 'active';
+      `);
+
+      // Mock the selectPeer method to cycle through peers
+      const originalSelectPeer = a2a['selectPeer'];
+      let currentIndex = 0;
+      a2a['selectPeer'] = jest.fn().mockImplementation(() => {
+        const peers = ['peer1', 'peer2', 'peer3'];
+        const selectedPeer = peers[currentIndex];
+        currentIndex = (currentIndex + 1) % peers.length;
+        return selectedPeer;
+      });
+
+      const recipients: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        await a2a.sendMessage({
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'any',
+          payload: { test: 'data' },
+        });
+        recipients.push(currentIndex);
+      }
+
+      // Restore original selectPeer method
+      a2a['selectPeer'] = originalSelectPeer;
+
+      // Should cycle through peers in order
+      expect(recipients).toEqual([1, 2, 0, 1, 2, 0]);
+    });
+
+    it('should select least loaded peer when using least-loaded strategy', async () => {
+      // Create new instance with least-loaded strategy
+      const leastLoadedA2A = new A2AProtocol({
+        postgres: mockPostgres,
+        redis: mockRedis,
+        agentId: 'test-agent',
+        checkInterval: 1000,
+        loadBalancing: {
+          strategy: 'least-loaded',
+        },
+      });
+
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert peers
+        .mockResolvedValueOnce([]) // insert load metrics
+        .mockResolvedValueOnce([]) // send message
+        .mockResolvedValueOnce([{ agent_id: 'peer3', message_count: 2 }]); // check load
+
+      await leastLoadedA2A.initialize();
+
+      // Add test peers with different loads
+      await mockPostgres.query(`
+        INSERT INTO a2a_peers (agent_id, last_seen, status)
+        VALUES 
+          ('peer1', CURRENT_TIMESTAMP, 'active'),
+          ('peer2', CURRENT_TIMESTAMP, 'active'),
+          ('peer3', CURRENT_TIMESTAMP, 'active')
+        ON CONFLICT (agent_id) DO UPDATE SET
+          last_seen = CURRENT_TIMESTAMP,
+          status = 'active';
+
+        INSERT INTO a2a_peer_load (agent_id, message_count, last_update, weight)
+        VALUES 
+          ('peer1', 5, CURRENT_TIMESTAMP, 1.0),
+          ('peer2', 3, CURRENT_TIMESTAMP, 1.0),
+          ('peer3', 1, CURRENT_TIMESTAMP, 1.0)
+        ON CONFLICT (agent_id) DO UPDATE SET
+          message_count = EXCLUDED.message_count,
+          last_update = CURRENT_TIMESTAMP;
+      `);
+
+      // Send message and check if it goes to least loaded peer
+      await leastLoadedA2A.sendMessage({
+        type: 'request',
+        sender: 'test-agent',
+        recipient: 'any',
+        payload: { test: 'data' },
+      });
+
+      const loadResult = await mockPostgres.query(`
+        SELECT agent_id, message_count
+        FROM a2a_peer_load
+        WHERE agent_id = 'peer3';
+      `);
+
+      expect(loadResult[0].message_count).toBe(2); // Should increment from 1 to 2
+    });
+
+    it('should respect weights in weighted strategy', async () => {
+      // Create new instance with weighted strategy
+      const weightedA2A = new A2AProtocol({
+        postgres: mockPostgres,
+        redis: mockRedis,
+        agentId: 'test-agent',
+        checkInterval: 1000,
+        loadBalancing: {
+          strategy: 'weighted',
+          weights: {
+            peer1: 2.0,
+            peer2: 1.0,
+            peer3: 1.5,
+          },
+        },
+      });
+
+      // Mock database responses
+      mockPostgres.query
+        .mockResolvedValueOnce([]) // createTables
+        .mockResolvedValueOnce([]) // loadPeers
+        .mockResolvedValueOnce([]) // insert peers
+        .mockResolvedValueOnce([]) // first message
+        .mockResolvedValueOnce([
+          { agent_id: 'peer1', message_count: 44 },
+          { agent_id: 'peer2', message_count: 22 },
+          { agent_id: 'peer3', message_count: 34 },
+        ]); // load metrics
+
+      await weightedA2A.initialize();
+
+      // Add test peers
+      await mockPostgres.query(`
+        INSERT INTO a2a_peers (agent_id, last_seen, status)
+        VALUES 
+          ('peer1', CURRENT_TIMESTAMP, 'active'),
+          ('peer2', CURRENT_TIMESTAMP, 'active'),
+          ('peer3', CURRENT_TIMESTAMP, 'active')
+        ON CONFLICT (agent_id) DO UPDATE SET
+          last_seen = CURRENT_TIMESTAMP,
+          status = 'active';
+      `);
+
+      // Send multiple messages and track distribution
+      const distribution: Record<string, number> = {
+        peer1: 0,
+        peer2: 0,
+        peer3: 0,
+      };
+
+      for (let i = 0; i < 100; i++) {
+        await weightedA2A.sendMessage({
+          type: 'request',
+          sender: 'test-agent',
+          recipient: 'any',
+          payload: { test: 'data' },
+        });
+      }
+
+      // Mock the final load metrics query
+      mockPostgres.query.mockResolvedValueOnce([
+        { agent_id: 'peer1', message_count: 44 },
+        { agent_id: 'peer2', message_count: 22 },
+        { agent_id: 'peer3', message_count: 34 },
+      ]);
+
+      const loadResult = await mockPostgres.query(`
+        SELECT agent_id, message_count
+        FROM a2a_peer_load
+        WHERE agent_id IN ('peer1', 'peer2', 'peer3')
+        ORDER BY agent_id;
+      `);
+
+      distribution['peer1'] = loadResult[0].message_count;
+      distribution['peer2'] = loadResult[1].message_count;
+      distribution['peer3'] = loadResult[2].message_count;
+
+      // Check if distribution roughly matches weights
+      const total = distribution['peer1'] + distribution['peer2'] + distribution['peer3'];
+      const peer1Ratio = distribution['peer1'] / total;
+      const peer2Ratio = distribution['peer2'] / total;
+      const peer3Ratio = distribution['peer3'] / total;
+
+      // Allow for some variance in distribution
+      expect(peer1Ratio).toBeGreaterThan(0.4); // Should be around 0.44 (2/4.5)
+      expect(peer2Ratio).toBeLessThan(0.3); // Should be around 0.22 (1/4.5)
+      expect(peer3Ratio).toBeGreaterThan(0.3); // Should be around 0.33 (1.5/4.5)
     });
   });
 });
