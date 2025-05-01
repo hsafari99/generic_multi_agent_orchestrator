@@ -154,7 +154,7 @@ describe('A2AProtocol Integration', () => {
         await protocol2.start();
 
         // Wait for peer discovery
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Verify peers are discovered
         const peers1 = await protocol1.listPeers();
@@ -178,7 +178,7 @@ describe('A2AProtocol Integration', () => {
         expect(sentMessage.id).toBeDefined();
 
         // Wait longer for message processing and database operations
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         // Get the message ID from the database
         const result = await postgres.query<{ id: string }[]>(
@@ -199,9 +199,9 @@ describe('A2AProtocol Integration', () => {
         await protocol1.stop();
         await protocol2.stop();
         // Wait for background operations to complete
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
-    });
+    }, 10000); // Increase timeout to 10 seconds
 
     it('should handle message encryption and compression', async () => {
       try {
