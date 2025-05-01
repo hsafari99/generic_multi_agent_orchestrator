@@ -43,10 +43,7 @@ export class SchemaManager {
           }
         }
       });
-
-      console.log('Database schema initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize database schema:', error);
       throw error;
     }
   }

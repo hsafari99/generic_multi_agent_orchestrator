@@ -44,12 +44,10 @@ describe('PostgresClient', () => {
   };
 
   beforeEach(() => {
-    console.log('Setting up test...');
     jest.clearAllMocks();
     client = new PostgresClient(config);
     mockPool = (Pool as unknown as jest.Mock).mock.results[0].value;
     (mockPool.connect as jest.Mock).mockImplementation(() => {
-      console.log('Mock pool connect called');
       return Promise.resolve({
         query: jest.fn(),
         release: jest.fn(),
@@ -83,7 +81,6 @@ describe('PostgresClient', () => {
 
   describe('query', () => {
     it('should execute query and return rows', async () => {
-      console.log('Running query test...');
       const mockRows = [{ id: 1, name: 'test' }];
       const mockClient = {
         query: jest.fn().mockResolvedValue({ rows: mockRows }),
@@ -92,14 +89,12 @@ describe('PostgresClient', () => {
       mockPool.connect.mockResolvedValueOnce(mockClient);
 
       const result = await client.query('SELECT * FROM test');
-      console.log('Query result:', result);
       expect(result).toEqual(mockRows);
       expect(mockClient.query).toHaveBeenCalledWith('SELECT * FROM test', undefined);
       expect(mockClient.release).toHaveBeenCalled();
     });
 
     it('should execute query with parameters', async () => {
-      console.log('Running parameterized query test...');
       const mockRows = [{ id: 1, name: 'test' }];
       const mockClient = {
         query: jest.fn().mockResolvedValue({ rows: mockRows }),
@@ -109,7 +104,6 @@ describe('PostgresClient', () => {
 
       const params = [1, 'test'];
       const result = await client.query('SELECT * FROM test WHERE id = $1 AND name = $2', params);
-      console.log('Parameterized query result:', result);
       expect(result).toEqual(mockRows);
       expect(mockClient.query).toHaveBeenCalledWith(
         'SELECT * FROM test WHERE id = $1 AND name = $2',
@@ -119,7 +113,6 @@ describe('PostgresClient', () => {
     });
 
     it('should release client on error', async () => {
-      console.log('Running error test...');
       const mockError = new Error('Query failed');
       const mockClient = {
         query: jest.fn().mockRejectedValue(mockError),
@@ -130,7 +123,6 @@ describe('PostgresClient', () => {
       try {
         await client.query('SELECT * FROM test');
       } catch (error: unknown) {
-        console.log('Caught error:', error);
         expect(error).toBeInstanceOf(Error);
         expect((error as Error).message).toBe('Query failed');
       }
@@ -140,7 +132,6 @@ describe('PostgresClient', () => {
 
   describe('executeFile', () => {
     it('should execute SQL file', async () => {
-      console.log('Running SQL file test...');
       const mockSql = 'SELECT * FROM test;';
       (fs.readFileSync as jest.Mock).mockReturnValue(mockSql);
       const mockClient = {
@@ -156,10 +147,8 @@ describe('PostgresClient', () => {
     });
 
     it('should release client on error', async () => {
-      console.log('Running SQL file error test...');
       const mockError = new Error('File execution failed');
       (fs.readFileSync as jest.Mock).mockImplementation(() => {
-        console.log('Mock readFileSync throwing error');
         throw mockError;
       });
       const mockClient = {
@@ -171,7 +160,6 @@ describe('PostgresClient', () => {
       try {
         await client.executeFile('test.sql');
       } catch (error: unknown) {
-        console.log('Caught file error:', error);
         expect(error).toBeInstanceOf(Error);
         expect((error as Error).message).toBe('File execution failed');
       }
@@ -181,7 +169,6 @@ describe('PostgresClient', () => {
 
   describe('shutdown', () => {
     it('should end the pool', async () => {
-      console.log('Running shutdown test...');
       await client.shutdown();
       expect(mockPool.end).toHaveBeenCalled();
     });

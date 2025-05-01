@@ -220,6 +220,11 @@ export class A2AProtocol extends EventEmitter {
   }
 
   private async updatePeerLoad(peerId: string): Promise<void> {
+    if (!peerId) {
+      this.logger.warn('Attempted to update peer load with null/undefined peerId');
+      return;
+    }
+
     const currentLoad = this.peerLoads.get(peerId) || {
       messageCount: 0,
       lastUpdate: Date.now(),
@@ -229,63 +234,135 @@ export class A2AProtocol extends EventEmitter {
     currentLoad.messageCount++;
     currentLoad.lastUpdate = Date.now();
 
-    await this.postgres.query(
-      `
-      INSERT INTO a2a_peer_load (agent_id, message_count, last_update, weight)
-      VALUES ($1, $2, CURRENT_TIMESTAMP, $3)
-      ON CONFLICT (agent_id) DO UPDATE SET
-        message_count = $2,
-        last_update = CURRENT_TIMESTAMP,
-        weight = $3,
-        updated_at = CURRENT_TIMESTAMP
-      `,
-      [peerId, currentLoad.messageCount, currentLoad.weight]
-    );
+    try {
+      // First ensure the peer exists
+      await this.postgres.query(
+        `
+        INSERT INTO a2a_peers (agent_id, last_seen, status)
+        VALUES ($1, CURRENT_TIMESTAMP, 'active')
+        ON CONFLICT (agent_id) DO UPDATE SET
+          last_seen = CURRENT_TIMESTAMP,
+          status = 'active'
+        `,
+        [peerId]
+      );
 
-    this.peerLoads.set(peerId, currentLoad);
+      // Then update the load
+      await this.postgres.query(
+        `
+        INSERT INTO a2a_peer_load (agent_id, message_count, last_update, weight)
+        VALUES ($1, $2, CURRENT_TIMESTAMP, $3)
+        ON CONFLICT (agent_id) DO UPDATE SET
+          message_count = $2,
+          last_update = CURRENT_TIMESTAMP,
+          weight = $3
+        `,
+        [peerId, currentLoad.messageCount, currentLoad.weight]
+      );
+
+      this.peerLoads.set(peerId, currentLoad);
+      this.logger.debug('Peer load updated', {
+        peerId,
+        newLoad: currentLoad,
+        allLoads: Object.fromEntries(this.peerLoads),
+      });
+    } catch (error) {
+      this.logger.error('Error updating peer load', { peerId, error });
+      throw error;
+    }
   }
 
   private selectPeer(recipient: string): string {
-    if (!this.loadBalancing) {
+    this.logger.debug('selectPeer called', { recipient, loadBalancing: this.loadBalancing });
+
+    // If recipient is specific and no load balancing, return as is
+    if (recipient !== 'any' && !this.loadBalancing) {
+      this.logger.debug(
+        'Bypassing load balancing - specific recipient and no load balancing config',
+        { recipient }
+      );
       return recipient;
     }
 
+    // Get active peers excluding self and 'any'
     const activePeers = Array.from(this.peers.entries())
-      .filter(([, isActive]) => isActive)
+      .filter(([id, isActive]) => isActive && id !== this.agentId && id !== 'any')
       .map(([id]) => id);
 
+    this.logger.debug('Active peers found', {
+      activePeers,
+      currentPeerIndex: this.currentPeerIndex,
+      peersMap: Array.from(this.peers.entries()),
+    });
+
+    // If no active peers, return original recipient
     if (activePeers.length === 0) {
+      this.logger.debug('No active peers found, returning original recipient', { recipient });
       return recipient;
     }
 
-    switch (this.loadBalancing.strategy) {
+    // Apply load balancing strategy
+    this.logger.debug('Applying load balancing strategy', {
+      strategy: this.loadBalancing?.strategy,
+      currentPeerIndex: this.currentPeerIndex,
+      activePeers,
+    });
+
+    switch (this.loadBalancing?.strategy) {
       case 'round-robin':
+        const selectedPeer = activePeers[this.currentPeerIndex];
         this.currentPeerIndex = (this.currentPeerIndex + 1) % activePeers.length;
-        return activePeers[this.currentPeerIndex];
+        this.logger.debug('Round-robin selection', {
+          previousIndex: this.currentPeerIndex - 1,
+          newIndex: this.currentPeerIndex,
+          selectedPeer,
+          activePeers,
+        });
+        return selectedPeer;
 
       case 'least-loaded':
-        return activePeers.reduce((min, current) => {
-          const minLoad = this.peerLoads.get(min)?.messageCount || 0;
-          const currentLoad = this.peerLoads.get(current)?.messageCount || 0;
-          return currentLoad < minLoad ? current : min;
+        const leastLoaded = activePeers.reduce((a, b) => {
+          const loadA = this.peerLoads.get(a)?.messageCount || 0;
+          const loadB = this.peerLoads.get(b)?.messageCount || 0;
+          return loadA < loadB ? a : b;
         });
+        this.logger.debug('Least-loaded selection', {
+          selectedPeer: leastLoaded,
+          peerLoads: Object.fromEntries(this.peerLoads),
+        });
+        return leastLoaded;
 
       case 'weighted':
-        const totalWeight = activePeers.reduce((sum, peer) => {
-          return sum + (this.peerLoads.get(peer)?.weight || 1.0);
-        }, 0);
-
+        const totalWeight = activePeers.reduce(
+          (sum, peer) => sum + (this.peerLoads.get(peer)?.weight || 1.0),
+          0
+        );
         let random = Math.random() * totalWeight;
         for (const peer of activePeers) {
           const weight = this.peerLoads.get(peer)?.weight || 1.0;
           random -= weight;
           if (random <= 0) {
+            this.logger.debug('Weighted selection', {
+              selectedPeer: peer,
+              peerWeights: Object.fromEntries(
+                activePeers.map(p => [p, this.peerLoads.get(p)?.weight || 1.0])
+              ),
+            });
             return peer;
           }
         }
+        this.logger.debug('Weighted selection fallback', {
+          selectedPeer: activePeers[0],
+          peerWeights: Object.fromEntries(
+            activePeers.map(p => [p, this.peerLoads.get(p)?.weight || 1.0])
+          ),
+        });
         return activePeers[0];
 
       default:
+        this.logger.debug('No load balancing strategy, returning original recipient', {
+          recipient,
+        });
         return recipient;
     }
   }
@@ -558,7 +635,7 @@ export class A2AProtocol extends EventEmitter {
     }
   }
 
-  async sendMessage(message: Omit<A2AMessage, 'id' | 'timestamp'>): Promise<void> {
+  async sendMessage(message: Omit<A2AMessage, 'id' | 'timestamp'>): Promise<A2AMessage> {
     if (this.rateLimiter) {
       const canSend = await this.rateLimiter.acquireToken();
       if (!canSend) {
@@ -589,14 +666,6 @@ export class A2AProtocol extends EventEmitter {
     const selectedPeer = this.selectPeer(message.recipient);
     fullMessage.recipient = selectedPeer;
 
-    this.logger.info('Sending A2A message', {
-      messageId: fullMessage.id,
-      recipient: fullMessage.recipient,
-      type: fullMessage.type,
-      payload: fullMessage.payload,
-      metadata: fullMessage.metadata,
-    });
-
     // Update peer load metrics
     await this.updatePeerLoad(selectedPeer);
 
@@ -619,12 +688,6 @@ export class A2AProtocol extends EventEmitter {
       });
       throw error;
     }
-
-    this.logger.debug('Message after encryption', {
-      messageId: fullMessage.id,
-      isEncrypted: !!this.encryption,
-      messageToStore,
-    });
 
     try {
       if (this.compression) {
@@ -652,12 +715,6 @@ export class A2AProtocol extends EventEmitter {
       throw error;
     }
 
-    this.logger.debug('Message after compression', {
-      messageId: fullMessage.id,
-      isCompressed: !!this.compression,
-      messageToStore,
-    });
-
     // Store message in database
     const dbParams = [
       fullMessage.id,
@@ -669,147 +726,193 @@ export class A2AProtocol extends EventEmitter {
       JSON.stringify(fullMessage.metadata || {}),
     ];
 
-    this.logger.debug('Database parameters', {
-      messageId: fullMessage.id,
-      params: dbParams,
-    });
-
-    await this.postgres.query(
-      `
-      INSERT INTO a2a_messages (id, type, sender, recipient, timestamp, payload, metadata)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      `,
-      dbParams
-    );
+    try {
+      await this.postgres.query(
+        `
+        INSERT INTO a2a_messages (id, type, sender, recipient, timestamp, payload, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `,
+        dbParams
+      );
+    } catch (error) {
+      throw error;
+    }
 
     // Cache message for quick retrieval
-    await this.redis.getClient().set(
-      `a2a:message:${fullMessage.id}`,
-      JSON.stringify(messageToStore),
-      { EX: 3600 } // 1 hour cache
-    );
+    try {
+      await this.redis.getClient().set(
+        `a2a:message:${fullMessage.id}`,
+        JSON.stringify(messageToStore),
+        { EX: 3600 } // 1 hour cache
+      );
+    } catch (error) {
+      // Don't throw here, as the message is already in the database
+    }
 
     this.emit('messageSent', fullMessage);
+    return fullMessage;
   }
 
   async receiveMessage(messageId: string): Promise<A2AMessage | null> {
     try {
+      this.logger.debug('Starting receiveMessage', { messageId });
+
       // Try cache first
       let cachedMessage: string | null = null;
       try {
         cachedMessage = await this.redis.getClient().get(`a2a:message:${messageId}`);
+        this.logger.debug('Cache lookup result', { messageId, found: !!cachedMessage });
       } catch (error) {
         this.logger.warn('Error getting message from cache, falling back to database', error);
-        // Throw the Redis error to match test expectations
-        throw error;
+        throw new Error('Cache error'); // Propagate the cache error instead of falling back
       }
+
+      let message: any;
+      let dbResult: any = null;
 
       if (cachedMessage) {
-        const message = JSON.parse(cachedMessage);
-        let decryptedMessage = message;
+        this.logger.debug('Processing cached message', { messageId, cachedMessage });
+        message = JSON.parse(cachedMessage);
+        this.logger.debug('Parsed cached message', { messageId, message });
 
-        try {
-          if (this.encryption && this.isEncryptedMessage(message)) {
-            decryptedMessage = JSON.parse(this.encryption.decrypt(message));
-          }
-        } catch (error) {
-          await this.logSecurityEvent({
-            type: 'decryption',
-            severity: 'high',
-            message: 'Failed to decrypt message',
-            timestamp: Date.now(),
-            metadata: {
-              error: error instanceof Error ? error.message : String(error),
-              messageId,
-            },
-          });
-          throw error;
+        // Handle compression first if compression is enabled
+        if (this.compression && this.isCompressedMessage(message)) {
+          this.logger.debug('Decompressing message', { messageId, message });
+          const decompressedData = await this.compression.decompress(message);
+          this.logger.debug('Message after decompression', { messageId, decompressedData });
+          message = JSON.parse(decompressedData);
         }
 
-        try {
-          if (this.compression && this.isCompressedMessage(decryptedMessage)) {
-            decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
-          }
-        } catch (error) {
-          await this.logSecurityEvent({
-            type: 'compression',
-            severity: 'medium',
-            message: 'Failed to decompress message',
-            timestamp: Date.now(),
-            metadata: {
-              error: error instanceof Error ? error.message : String(error),
-              messageId,
-            },
-          });
-          throw error;
-        }
-
-        return decryptedMessage;
-      }
-
-      // Try database
-      const result = await this.postgres.query<
-        {
-          id: string;
-          type: string;
-          sender: string;
-          recipient: string;
-          timestamp: Date;
-          payload: any;
-          metadata: any;
-        }[]
-      >(
-        `
-        SELECT * FROM a2a_messages WHERE id = $1
-        `,
-        [messageId]
-      );
-
-      if (!result || result.length === 0) {
-        return null;
-      }
-
-      const message = result[0].payload;
-      let decryptedMessage = message;
-
-      try {
+        // Handle encryption if encryption is enabled
         if (this.encryption && this.isEncryptedMessage(message)) {
-          decryptedMessage = JSON.parse(this.encryption.decrypt(message));
+          this.logger.debug('Decrypting message', { messageId, message });
+          const decryptedData = this.encryption.decrypt(message);
+          this.logger.debug('Message after decryption', { messageId, decryptedData });
+          message = JSON.parse(decryptedData);
         }
-      } catch (error) {
-        await this.logSecurityEvent({
-          type: 'decryption',
-          severity: 'high',
-          message: 'Failed to decrypt message',
-          timestamp: Date.now(),
-          metadata: {
-            error: error instanceof Error ? error.message : String(error),
-            messageId,
-          },
+      } else {
+        // Try database
+        this.logger.debug('Fetching message from database', { messageId });
+        const result = await this.postgres.query<
+          {
+            id: string;
+            type: string;
+            sender: string;
+            recipient: string;
+            timestamp: Date;
+            payload: any;
+            metadata: any;
+          }[]
+        >(
+          `
+          SELECT * FROM a2a_messages WHERE id = $1
+          `,
+          [messageId]
+        );
+
+        if (!result || result.length === 0) {
+          this.logger.debug('Message not found in database', { messageId });
+          return null;
+        }
+
+        dbResult = result[0];
+        message = result[0].payload;
+        this.logger.debug('Retrieved message from database', {
+          messageId,
+          dbResult,
+          message,
         });
-        throw error;
       }
 
-      try {
-        if (this.compression && this.isCompressedMessage(decryptedMessage)) {
-          decryptedMessage = JSON.parse(await this.compression.decompress(decryptedMessage));
+      // If message is a string, parse it
+      if (typeof message === 'string') {
+        this.logger.debug('Parsing string message', { messageId, message });
+        message = JSON.parse(message);
+        this.logger.debug('Message after string parsing', { messageId, message });
+      }
+
+      // If we have a database result, reconstruct the message with the original metadata
+      if (dbResult) {
+        this.logger.debug('Reconstructing message from database result', {
+          messageId,
+          currentMessage: message,
+          dbResult,
+          messageType: typeof message,
+          isCompressed: this.isCompressedMessage(message),
+          isEncrypted: this.isEncryptedMessage(message),
+          hasPayload: message?.payload !== undefined,
+          payloadType: typeof message?.payload,
+        });
+
+        // Handle encryption if encryption is enabled
+        if (this.encryption && message.data && this.isEncryptedMessage(message.data)) {
+          this.logger.debug('Decrypting message', { messageId, message });
+          const decryptedData = this.encryption.decrypt(message.data);
+          this.logger.debug('Message after decryption', { messageId, decryptedData });
+          message = JSON.parse(decryptedData);
         }
-      } catch (error) {
-        await this.logSecurityEvent({
-          type: 'compression',
-          severity: 'medium',
-          message: 'Failed to decompress message',
-          timestamp: Date.now(),
-          metadata: {
-            error: error instanceof Error ? error.message : String(error),
-            messageId,
+
+        message = {
+          id: dbResult.id,
+          type: dbResult.type as 'request' | 'response' | 'notification',
+          sender: dbResult.sender,
+          recipient: dbResult.recipient,
+          timestamp: dbResult.timestamp.getTime(),
+          payload: message.payload || message,
+          metadata: dbResult.metadata,
+        };
+        this.logger.debug('Reconstructed message', {
+          messageId,
+          message,
+          messageType: typeof message,
+          hasPayload: message?.payload !== undefined,
+          payloadType: typeof message?.payload,
+          validation: {
+            isObject: typeof message === 'object',
+            hasId: typeof message?.id === 'string',
+            hasValidType:
+              message?.type && ['request', 'response', 'notification'].includes(message.type),
+            hasSender: typeof message?.sender === 'string',
+            hasRecipient: typeof message?.recipient === 'string',
+            hasTimestamp: typeof message?.timestamp === 'number',
+            hasPayload: typeof message?.payload === 'object' && message?.payload !== null,
           },
         });
-        throw error;
+      } else if (this.isCompressedMessage(message) || this.isEncryptedMessage(message)) {
+        // If we got the message from cache and it's still in compressed/encrypted form,
+        // we need to parse the data field
+        this.logger.debug('Parsing data field from cached message', { messageId, message });
+        const messageData = 'data' in message ? message.data : message.encryptedData;
+        const parsedData = JSON.parse(messageData);
+        message = {
+          id: messageId,
+          type: parsedData.type,
+          sender: parsedData.sender,
+          recipient: parsedData.recipient,
+          timestamp: parsedData.timestamp,
+          payload: parsedData.payload,
+          metadata: parsedData.metadata,
+        };
+        this.logger.debug('Parsed message from data field', { messageId, message });
       }
 
       // Validate message structure
-      if (!this.isValidMessage(decryptedMessage)) {
+      this.logger.debug('Validating message structure', { messageId, message });
+      if (!this.isValidMessage(message)) {
+        this.logger.error('Invalid message structure', {
+          messageId,
+          message,
+          validation: {
+            isObject: typeof message === 'object',
+            hasId: typeof message?.id === 'string',
+            hasValidType:
+              message?.type && ['request', 'response', 'notification'].includes(message.type),
+            hasSender: typeof message?.sender === 'string',
+            hasRecipient: typeof message?.recipient === 'string',
+            hasTimestamp: typeof message?.timestamp === 'number',
+            hasPayload: typeof message?.payload === 'object' && message?.payload !== null,
+          },
+        });
         await this.logSecurityEvent({
           type: 'validation',
           severity: 'high',
@@ -817,39 +920,46 @@ export class A2AProtocol extends EventEmitter {
           timestamp: Date.now(),
           metadata: {
             messageId,
-            message: decryptedMessage,
+            message,
+            validation: {
+              isObject: typeof message === 'object',
+              hasId: typeof message?.id === 'string',
+              hasValidType:
+                message?.type && ['request', 'response', 'notification'].includes(message.type),
+              hasSender: typeof message?.sender === 'string',
+              hasRecipient: typeof message?.recipient === 'string',
+              hasTimestamp: typeof message?.timestamp === 'number',
+              hasPayload: typeof message?.payload === 'object' && message?.payload !== null,
+            },
           },
         });
         throw new Error('Invalid message structure');
       }
 
-      // Reconstruct the complete message object
-      const reconstructedMessage: A2AMessage = {
-        id: result[0].id,
-        type: result[0].type as 'request' | 'response' | 'notification',
-        sender: result[0].sender,
-        recipient: result[0].recipient,
-        timestamp: result[0].timestamp.getTime(),
-        payload: decryptedMessage.payload,
-        metadata: result[0].metadata,
-      };
-
-      // Cache the result
-      try {
-        await this.redis.getClient().set(
-          `a2a:message:${messageId}`,
-          JSON.stringify(message),
-          { EX: 3600 } // 1 hour cache
-        );
-      } catch (error) {
-        this.logger.warn('Error caching message', error);
+      // Cache the result if it came from database
+      if (!cachedMessage) {
+        try {
+          this.logger.debug('Caching message', { messageId, message });
+          await this.redis.getClient().set(
+            `a2a:message:${messageId}`,
+            JSON.stringify(message),
+            { EX: 3600 } // 1 hour cache
+          );
+        } catch (error) {
+          this.logger.warn('Error caching message', error);
+          throw new Error('Cache error'); // Propagate the cache error instead of falling back
+        }
       }
 
-      return reconstructedMessage;
+      this.logger.debug('Successfully processed message', { messageId, message });
+      return message;
     } catch (error) {
-      this.logger.error('Error receiving message', error);
+      this.logger.error(
+        'Error receiving message',
+        error instanceof Error ? error : new Error(String(error))
+      );
       this.emit('error', error);
-      throw error; // Re-throw the error to be caught by the test
+      throw error;
     }
   }
 
@@ -875,12 +985,14 @@ export class A2AProtocol extends EventEmitter {
   private isValidMessage(message: any): message is A2AMessage {
     return (
       typeof message === 'object' &&
+      message !== null &&
       typeof message.id === 'string' &&
       ['request', 'response', 'notification'].includes(message.type) &&
       typeof message.sender === 'string' &&
       typeof message.recipient === 'string' &&
       typeof message.timestamp === 'number' &&
-      typeof message.payload === 'object'
+      typeof message.payload === 'object' &&
+      message.payload !== null
     );
   }
 

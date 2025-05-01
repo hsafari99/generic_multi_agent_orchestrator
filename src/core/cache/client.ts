@@ -43,22 +43,18 @@ export class RedisClient {
    */
   private setupEventHandlers(): void {
     this.client.on('connect', () => {
-      console.log('Redis client connected');
       this.isConnected = true;
     });
 
-    this.client.on('error', error => {
-      console.error('Redis client error:', error);
+    this.client.on('error', () => {
       this.isConnected = false;
     });
 
     this.client.on('reconnecting', () => {
-      console.log('Redis client reconnecting');
       this.isConnected = false;
     });
 
     this.client.on('end', () => {
-      console.log('Redis client connection ended');
       this.isConnected = false;
     });
   }

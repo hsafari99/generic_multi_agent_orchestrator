@@ -112,7 +112,7 @@ export class Logger {
     // Send to all transports
     this.transports.forEach(transport => {
       transport.log(logMessage).catch(err => {
-        console.error('Failed to log message:', err);
+        throw err;
       });
     });
   }

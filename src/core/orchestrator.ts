@@ -356,9 +356,9 @@ export class Orchestrator {
    *
    * @param message - The result message to handle
    */
-  private async handleResultMessage(message: IMessage): Promise<void> {
+  private async handleResultMessage(): Promise<void> {
     // Handle task results
-    console.log(`Received result from ${message.sender}:`, message.payload);
+    // console.log(`Received result from ${message.sender}:`, message.payload);
   }
 
   /**
@@ -366,9 +366,9 @@ export class Orchestrator {
    *
    * @param message - The status message to handle
    */
-  private async handleStatusMessage(message: IMessage): Promise<void> {
+  private async handleStatusMessage(): Promise<void> {
     // Handle status updates
-    console.log(`Status update from ${message.sender}:`, message.payload);
+    // console.log(`Status update from ${message.sender}:`, message.payload);
   }
 
   /**
@@ -376,9 +376,9 @@ export class Orchestrator {
    *
    * @param message - The error message to handle
    */
-  private async handleErrorMessage(message: IMessage): Promise<void> {
+  private async handleErrorMessage(): Promise<void> {
     // Handle error reports
-    console.error(`Error from ${message.sender}:`, message.payload);
+    // console.error(`Error from ${message.sender}:`, message.payload);
   }
 
   /**
@@ -386,8 +386,8 @@ export class Orchestrator {
    *
    * @param message - The control message to handle
    */
-  private async handleControlMessage(message: IMessage): Promise<void> {
+  private async handleControlMessage(): Promise<void> {
     // Handle control commands
-    console.log(`Control message from ${message.sender}:`, message.payload);
+    // console.log(`Control message from ${message.sender}:`, message.payload);
   }
 }

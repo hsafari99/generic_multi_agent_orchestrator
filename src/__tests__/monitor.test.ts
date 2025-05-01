@@ -188,8 +188,6 @@ describe('ToolMonitor', () => {
       const status = 'failure';
       const error = 'Test error';
 
-      console.log('Starting failed execution test');
-
       // Mock all postgres queries
       mockPostgres.query
         // First query - insert into execution history

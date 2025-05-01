@@ -23,6 +23,12 @@ export class MessageEncryption {
       keyLength: config?.keyLength || 32,
       ivLength: config?.ivLength || 16,
     };
+
+    // Validate key format
+    if (!/^[0-9a-f]{64}$/.test(key)) {
+      throw new Error('Invalid encryption key format. Key must be a 32-byte hex string.');
+    }
+
     this.key = Buffer.from(key, 'hex');
   }
 

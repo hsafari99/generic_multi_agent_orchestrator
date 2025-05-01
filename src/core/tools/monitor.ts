@@ -187,11 +187,9 @@ export class ToolMonitor extends EventEmitter {
     result?: any,
     metadata?: Record<string, any>
   ): Promise<void> {
-    console.log('Starting recordExecution', { toolId, duration, status, error });
     this.logger.info('Recording tool execution', { toolId, duration, status });
 
     // Record in execution history
-    console.log('Executing first postgres query');
     await this.postgres.query(
       `
       INSERT INTO tool_execution_history (
@@ -211,7 +209,6 @@ export class ToolMonitor extends EventEmitter {
     );
 
     // Update metrics
-    console.log('Executing second postgres query');
     await this.postgres.query(
       `
       INSERT INTO tool_metrics (
@@ -248,11 +245,8 @@ export class ToolMonitor extends EventEmitter {
     );
 
     // Update cache
-    console.log('Getting metrics for cache update');
     const metrics = await this.getMetrics(toolId);
-    console.log('Got metrics:', metrics);
     if (metrics) {
-      console.log('Updating cache with metrics');
       await this.redis.getClient().set(
         `tool:${toolId}:metrics`,
         JSON.stringify(metrics),
@@ -272,16 +266,13 @@ export class ToolMonitor extends EventEmitter {
   }
 
   async getMetrics(toolId: string): Promise<ToolMetrics | null> {
-    console.log('Getting metrics for tool:', toolId);
     // Try cache first
     const cachedMetrics = await this.redis.getClient().get(`tool:${toolId}:metrics`);
-    console.log('Cached metrics:', cachedMetrics);
     if (cachedMetrics) {
       return JSON.parse(cachedMetrics);
     }
 
     // Try database
-    console.log('Querying database for metrics');
     const result = await this.postgres.query<
       {
         tool_id: string;
@@ -301,7 +292,6 @@ export class ToolMonitor extends EventEmitter {
       `,
       [toolId]
     );
-    console.log('Database query result:', result);
 
     if (result.length === 0) {
       return null;
@@ -322,7 +312,6 @@ export class ToolMonitor extends EventEmitter {
     };
 
     // Cache the result
-    console.log('Caching metrics:', metrics);
     await this.redis.getClient().set(
       `tool:${toolId}:metrics`,
       JSON.stringify(metrics),

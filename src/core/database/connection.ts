@@ -77,7 +77,6 @@ export class DatabaseConnection {
       const result = await this.query('SELECT 1');
       return result.length > 0;
     } catch (error) {
-      console.error('Database connection error:', error);
       throw error;
     }
   }
