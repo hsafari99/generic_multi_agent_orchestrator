@@ -4,7 +4,11 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
-  testPathIgnorePatterns: ['/node_modules/', '/integrationTest/'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/integrationTest/',
+    '.*\\.integration\\.test\\.ts$'
+  ],
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
@@ -24,6 +28,8 @@ module.exports = {
     '!src/core/cache/config.ts',
     '!src/core/cache/client.ts',
     '!src/core/cache/manager.ts',
+    '!src/__tests__/**/*.ts',
+    '!src/__tests__/a2a.integration.test.ts'
   ],
   coverageThreshold: {
     global: {
