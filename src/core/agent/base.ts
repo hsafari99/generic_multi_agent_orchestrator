@@ -1,4 +1,11 @@
-import { IAgent, AgentConfig, AgentState, AgentStatus, AgentCapabilities } from './types';
+import {
+  IAgent,
+  AgentConfig,
+  AgentState,
+  AgentStatus,
+  AgentCapabilities,
+  HealthStatus,
+} from './types';
 import { Logger } from '../logging/logger';
 
 /**
@@ -14,9 +21,30 @@ export abstract class BaseAgent implements IAgent {
     this.config = config;
     this.state = {
       status: AgentStatus.INITIALIZING,
+      health: {
+        status: HealthStatus.HEALTHY,
+        lastCheck: new Date(),
+        metrics: {
+          cpu: 0,
+          memory: 0,
+          responseTime: 0,
+          errorRate: 0,
+        },
+      },
       activeOperations: 0,
       lastStatusChange: new Date(),
       lastHealthCheck: new Date(),
+      resources: {
+        cpu: 0,
+        memory: 0,
+        network: {
+          bytesIn: 0,
+          bytesOut: 0,
+        },
+      },
+      capabilities: [],
+      load: 0,
+      isAvailable: true,
     };
     this.logger = Logger.getInstance();
   }

@@ -10,6 +10,15 @@ export enum AgentStatus {
 }
 
 /**
+ * Agent health status enum
+ */
+export enum HealthStatus {
+  HEALTHY = 'healthy',
+  DEGRADED = 'degraded',
+  UNHEALTHY = 'unhealthy',
+}
+
+/**
  * Agent capabilities interface
  */
 export interface AgentCapabilities {
@@ -29,14 +38,55 @@ export interface AgentCapabilities {
 export interface AgentState {
   /** Current status of the agent */
   status: AgentStatus;
-  /** Last error message if any */
-  lastError?: string;
+
+  /** Health status of the agent */
+  health: {
+    status: HealthStatus;
+    lastCheck: Date;
+    metrics: {
+      cpu: number;
+      memory: number;
+      responseTime: number;
+      errorRate: number;
+    };
+  };
+
   /** Current number of active operations */
   activeOperations: number;
+
+  /** Current task being processed, if any */
+  currentTask?: string;
+
+  /** Last error message if any */
+  lastError?: string;
+
   /** Timestamp of last status change */
   lastStatusChange: Date;
+
   /** Timestamp of last health check */
   lastHealthCheck: Date;
+
+  /** Resource usage metrics */
+  resources: {
+    cpu: number;
+    memory: number;
+    network: {
+      bytesIn: number;
+      bytesOut: number;
+    };
+  };
+
+  /** Current capabilities of the agent */
+  capabilities: string[];
+
+  /** Current load percentage (0-100) */
+  load: number;
+
+  /** Priority level of the agent */
+  priority?: 'low' | 'normal' | 'high' | 'critical';
+
+  /** Whether the agent is available for new tasks */
+  isAvailable: boolean;
 }
 
 /**

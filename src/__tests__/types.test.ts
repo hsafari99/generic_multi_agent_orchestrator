@@ -4,6 +4,7 @@ import {
   AgentState,
   AgentConfig,
   IAgent,
+  HealthStatus,
 } from '../core/agent/types';
 
 describe('Agent Types', () => {
@@ -37,24 +38,71 @@ describe('Agent Types', () => {
     it('should have all required properties', () => {
       const state: AgentState = {
         status: AgentStatus.READY,
+        health: {
+          status: HealthStatus.HEALTHY,
+          lastCheck: new Date(),
+          metrics: {
+            cpu: 0,
+            memory: 0,
+            responseTime: 0,
+            errorRate: 0,
+          },
+        },
         activeOperations: 0,
         lastStatusChange: new Date(),
         lastHealthCheck: new Date(),
+        resources: {
+          cpu: 0,
+          memory: 0,
+          network: {
+            bytesIn: 0,
+            bytesOut: 0,
+          },
+        },
+        capabilities: [],
+        load: 0,
+        isAvailable: true,
       };
 
       expect(state.status).toBeDefined();
+      expect(state.health).toBeDefined();
       expect(state.activeOperations).toBeDefined();
       expect(state.lastStatusChange).toBeDefined();
       expect(state.lastHealthCheck).toBeDefined();
+      expect(state.resources).toBeDefined();
+      expect(state.capabilities).toBeDefined();
+      expect(state.load).toBeDefined();
+      expect(state.isAvailable).toBeDefined();
     });
 
     it('should allow optional lastError property', () => {
       const state: AgentState = {
         status: AgentStatus.ERROR,
+        health: {
+          status: HealthStatus.HEALTHY,
+          lastCheck: new Date(),
+          metrics: {
+            cpu: 0,
+            memory: 0,
+            responseTime: 0,
+            errorRate: 0,
+          },
+        },
         activeOperations: 0,
         lastStatusChange: new Date(),
         lastHealthCheck: new Date(),
         lastError: 'Test error',
+        resources: {
+          cpu: 0,
+          memory: 0,
+          network: {
+            bytesIn: 0,
+            bytesOut: 0,
+          },
+        },
+        capabilities: [],
+        load: 0,
+        isAvailable: true,
       };
 
       expect(state.lastError).toBe('Test error');
