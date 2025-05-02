@@ -61,6 +61,9 @@ export class MessageCompression {
   }
 
   getCompressionRatio(message: CompressedMessage): number {
+    if (message.originalSize === 0 && message.compressedSize === 0) {
+      return 1;
+    }
     return message.compressedSize / message.originalSize;
   }
 }

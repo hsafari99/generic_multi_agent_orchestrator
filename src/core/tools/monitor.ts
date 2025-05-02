@@ -245,13 +245,19 @@ export class ToolMonitor extends EventEmitter {
     );
 
     // Update cache
-    const metrics = await this.getMetrics(toolId);
-    if (metrics) {
-      await this.redis.getClient().set(
-        `tool:${toolId}:metrics`,
-        JSON.stringify(metrics),
-        { EX: 3600 } // 1 hour cache
-      );
+    try {
+      const metrics = await this.getMetrics(toolId);
+      if (metrics) {
+        await this.redis.getClient().set(
+          `tool:${toolId}:metrics`,
+          JSON.stringify(metrics),
+          { EX: 3600 } // 1 hour cache
+        );
+      }
+    } catch (error) {
+      this.logger.error('Failed to update cache', error);
+      this.emit('error', error);
+      // Continue without caching
     }
 
     this.emit('executionRecorded', {
@@ -266,10 +272,16 @@ export class ToolMonitor extends EventEmitter {
   }
 
   async getMetrics(toolId: string): Promise<ToolMetrics | null> {
-    // Try cache first
-    const cachedMetrics = await this.redis.getClient().get(`tool:${toolId}:metrics`);
-    if (cachedMetrics) {
-      return JSON.parse(cachedMetrics);
+    try {
+      // Try cache first
+      const cachedMetrics = await this.redis.getClient().get(`tool:${toolId}:metrics`);
+      if (cachedMetrics) {
+        return JSON.parse(cachedMetrics);
+      }
+    } catch (error) {
+      this.logger.error('Failed to get metrics from cache', error);
+      this.emit('error', error);
+      // Continue to database fallback
     }
 
     // Try database
@@ -293,7 +305,7 @@ export class ToolMonitor extends EventEmitter {
       [toolId]
     );
 
-    if (result.length === 0) {
+    if (!result || result.length === 0) {
       return null;
     }
 
@@ -311,12 +323,18 @@ export class ToolMonitor extends EventEmitter {
       timestamp: Date.now(),
     };
 
-    // Cache the result
-    await this.redis.getClient().set(
-      `tool:${toolId}:metrics`,
-      JSON.stringify(metrics),
-      { EX: 3600 } // 1 hour cache
-    );
+    try {
+      // Cache the result
+      await this.redis.getClient().set(
+        `tool:${toolId}:metrics`,
+        JSON.stringify(metrics),
+        { EX: 3600 } // 1 hour cache
+      );
+    } catch (error) {
+      this.logger.error('Failed to cache metrics', error);
+      this.emit('error', error);
+      // Continue without caching
+    }
 
     return metrics;
   }
