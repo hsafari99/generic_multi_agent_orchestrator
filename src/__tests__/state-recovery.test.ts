@@ -1,13 +1,13 @@
-import { StateRecovery } from '../../core/agent/state-recovery';
-import { PostgresClient } from '../../core/storage/postgres';
-import { RedisClient } from '../../core/cache/client';
-import { AgentState, AgentStatus, HealthStatus } from '../../core/agent/types';
-import { Logger } from '../../core/logging/logger';
+import { StateRecovery } from '../core/agent/state-recovery';
+import { PostgresClient } from '../core/storage/postgres';
+import { RedisClient } from '../core/cache/client';
+import { AgentState, AgentStatus, HealthStatus } from '../core/agent/types';
+import { Logger } from '../core/logging/logger';
 
 // Mock dependencies
-jest.mock('../../core/storage/postgres');
-jest.mock('../../core/cache/client');
-jest.mock('../../core/logging/logger');
+jest.mock('../core/storage/postgres');
+jest.mock('../core/cache/client');
+jest.mock('../core/logging/logger');
 
 describe('StateRecovery', () => {
   let stateRecovery: StateRecovery;
