@@ -97,8 +97,7 @@ async function main() {
     };
 
     // Step 3: Get translation from translation agent and wait for result
-    const translationResponse =
-      await orchestrator.handleMessage(translationMessage);
+    const translationResponse = await orchestrator.handleMessage(translationMessage);
     console.log('Translation requested');
 
     // Check if we need language information
@@ -119,16 +118,12 @@ async function main() {
         payload: translationTask,
       };
 
-      const updatedTranslationResponse = await orchestrator.handleMessage(
-        updatedTranslationMessage,
-      );
-      console.log(
-        'Received translation:',
-        updatedTranslationResponse.payload.data.translation,
-      );
+      const updatedTranslationResponse =
+        await orchestrator.handleMessage(updatedTranslationMessage);
+      console.log('Received translation:', updatedTranslationResponse.payload.data.translation);
       console.log(
         'Translation details:',
-        `from ${updatedTranslationResponse.payload.data.sourceLanguage} to ${updatedTranslationResponse.payload.data.targetLanguage}`,
+        `from ${updatedTranslationResponse.payload.data.sourceLanguage} to ${updatedTranslationResponse.payload.data.targetLanguage}`
       );
 
       // Step 4: Orchestrator sends translated question to GPT agent

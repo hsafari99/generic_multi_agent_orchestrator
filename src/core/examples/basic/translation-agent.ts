@@ -1,13 +1,6 @@
 import { BaseAgent } from '../../agent/base';
 import { AgentConfig } from '../../agent/types';
-import {
-  IAgent,
-  AgentStatus,
-  ITask,
-  TaskResult,
-  IMessage,
-  MessageType,
-} from '../../interfaces';
+import { IAgent, AgentStatus, ITask, TaskResult, IMessage, MessageType } from '../../interfaces';
 import OpenAI from 'openai';
 
 export class TranslationAgent extends BaseAgent implements IAgent {
@@ -100,10 +93,7 @@ export class TranslationAgent extends BaseAgent implements IAgent {
         metadata: {},
       };
 
-      console.log(
-        'Sending translation result to orchestrator:',
-        responseMessage,
-      );
+      console.log('Sending translation result to orchestrator:', responseMessage);
       return responseMessage;
     }
     throw new Error(`Unsupported message type: ${message.type}`);
