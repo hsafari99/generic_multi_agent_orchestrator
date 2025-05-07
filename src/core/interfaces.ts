@@ -101,9 +101,10 @@ export interface IAgent {
   /**
    * Handle an incoming message
    * @param message - The message to handle
+   * @returns The response message
    * @throws {Error} If message handling fails
    */
-  handleMessage(message: IMessage): Promise<void>;
+  handleMessage(message: IMessage): Promise<IMessage>;
 }
 
 /**
@@ -171,6 +172,8 @@ export interface ITask {
   id: string;
   /** Type of the task */
   type: string;
+  /** Description of the task */
+  description: string;
   /** Priority of the task (higher number = higher priority) */
   priority: number;
   /** Current status of the task */
@@ -179,6 +182,8 @@ export interface ITask {
   agentId?: string;
   /** Task data */
   data: any;
+  /** Additional task metadata */
+  metadata: any;
 
   /**
    * Execute the task
@@ -282,5 +287,5 @@ export enum TaskStatus {
  * Interface for the orchestrator's message handling capabilities
  */
 export interface IOrchestrator {
-  handleMessage(message: IMessage): Promise<void>;
+  handleMessage(message: IMessage): Promise<IMessage>;
 }

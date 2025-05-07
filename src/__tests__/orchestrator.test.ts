@@ -41,8 +41,17 @@ class MockAgent implements IAgent {
     return { success: true, data: task.data };
   }
 
-  async handleMessage(message: IMessage): Promise<void> {
+  async handleMessage(message: IMessage): Promise<IMessage> {
     this.messageHandler(message);
+    return {
+      id: `resp-${message.id}`,
+      type: MessageType.RESULT,
+      sender: this.id,
+      receiver: message.sender,
+      payload: { success: true },
+      timestamp: Date.now(),
+      metadata: {},
+    };
   }
 }
 
@@ -696,10 +705,19 @@ describe('Orchestrator', () => {
       // Mock agent's handleMessage to take longer than the timeout
       jest.spyOn(agent, 'handleMessage').mockImplementation(async () => {
         await new Promise(resolve => setTimeout(resolve, 100));
+        return {
+          id: 'resp-msg1',
+          type: MessageType.RESULT,
+          sender: 'agent1',
+          receiver: 'system',
+          payload: { success: true },
+          timestamp: Date.now(),
+          metadata: {},
+        };
       });
 
       await expect(orchestrator.handleMessage(message)).rejects.toThrow(
-        'Message processing timeout'
+        'Message handling timed out after 1ms'
       );
     });
 
@@ -830,7 +848,15 @@ describe('Orchestrator', () => {
       };
 
       // Mock agent's handleMessage to resolve immediately
-      jest.spyOn(agent, 'handleMessage').mockResolvedValue();
+      jest.spyOn(agent, 'handleMessage').mockResolvedValue({
+        id: 'resp-msg1',
+        type: MessageType.RESULT,
+        sender: 'agent1',
+        receiver: 'system',
+        payload: { success: true },
+        timestamp: Date.now(),
+        metadata: {},
+      });
 
       await expect(orchestrator.handleMessage(message)).resolves.not.toThrow();
     });

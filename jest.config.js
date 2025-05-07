@@ -7,6 +7,7 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/integrationTest/',
+    '/examples/',
     '.*\\.integration\\.test\\.ts$'
   ],
   transform: {
@@ -29,7 +30,8 @@ module.exports = {
     '!src/core/cache/client.ts',
     '!src/core/cache/manager.ts',
     '!src/__tests__/**/*.ts',
-    '!src/__tests__/a2a.integration.test.ts'
+    '!src/__tests__/a2a.integration.test.ts',
+    '!src/core/examples/**/*.ts'
   ],
   coverageThreshold: {
     global: {

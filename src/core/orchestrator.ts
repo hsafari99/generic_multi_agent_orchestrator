@@ -20,7 +20,7 @@ export class Orchestrator {
   private agents: Map<string, IAgent>;
   private tools: Map<string, ITool>;
   private status: OrchestratorStatus;
-  private messageHandlers: Map<MessageType, (message: IMessage) => Promise<void>>;
+  private messageHandlers: Map<MessageType, (message: IMessage) => Promise<IMessage>>;
   private webSocket: OrchestratorWebSocket | null;
 
   /**
@@ -228,16 +228,14 @@ export class Orchestrator {
   }
 
   /**
-   * Handle incoming messages
+   * Handle an incoming message
    *
    * @param message - The message to handle
-   * @throws {Error} If no handler is registered for the message type
-   * @throws {Error} If message handling fails
+   * @returns The response message from the agent
    * @throws {Error} If message validation fails
-   * @throws {Error} If message processing times out
+   * @throws {Error} If message handling fails
    */
-  public async handleMessage(message: IMessage): Promise<void> {
-    // Validate message
+  public async handleMessage(message: IMessage): Promise<IMessage> {
     this.validateMessage(message);
 
     const handler = this.messageHandlers.get(message.type);
@@ -245,12 +243,7 @@ export class Orchestrator {
       throw new Error(`No handler registered for message type ${message.type}`);
     }
 
-    // Handle message with timeout if specified
-    if (message.metadata?.ttl) {
-      await this.handleMessageWithTimeout(handler, message);
-    } else {
-      await handler(message);
-    }
+    return await this.handleMessageWithTimeout(handler, message);
   }
 
   /**
@@ -280,30 +273,18 @@ export class Orchestrator {
     }
   }
 
-  /**
-   * Handle a message with timeout
-   *
-   * @param handler - The message handler function
-   * @param message - The message to handle
-   * @throws {Error} If message processing times out
-   */
   private async handleMessageWithTimeout(
-    handler: (message: IMessage) => Promise<void>,
+    handler: (message: IMessage) => Promise<IMessage>,
     message: IMessage
-  ): Promise<void> {
-    const timeout = message.metadata.ttl;
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Message processing timeout')), timeout || 0);
+  ): Promise<IMessage> {
+    const timeout = message.metadata?.ttl || 30000; // Use message TTL or default to 30 seconds
+    const timeoutPromise = new Promise<IMessage>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Message handling timed out after ${timeout}ms`));
+      }, timeout);
     });
 
-    try {
-      await Promise.race([handler(message), timeoutPromise]);
-    } catch (error: any) {
-      if (error.message === 'Message processing timeout') {
-        throw error;
-      }
-      throw new Error('Message processing timeout');
-    }
+    return Promise.race([handler(message), timeoutPromise]);
   }
 
   /**
@@ -340,15 +321,14 @@ export class Orchestrator {
    * Handle task messages
    *
    * @param message - The task message to handle
+   * @returns The response message from the agent
    * @throws {Error} If the target agent is not found
    * @throws {Error} If message handling fails
    */
-  private async handleTaskMessage(message: IMessage): Promise<void> {
-    const agent = this.agents.get(message.receiver);
-    if (!agent) {
-      throw new Error(`Agent with ID ${message.receiver} not found`);
-    }
-    await agent.handleMessage(message);
+  private async handleTaskMessage(message: IMessage): Promise<IMessage> {
+    const agent = this.getAgent(message.receiver);
+    const response = await agent.handleMessage(message);
+    return response;
   }
 
   /**
@@ -356,9 +336,9 @@ export class Orchestrator {
    *
    * @param message - The result message to handle
    */
-  private async handleResultMessage(): Promise<void> {
-    // Handle task results
-    // console.log(`Received result from ${message.sender}:`, message.payload);
+  private async handleResultMessage(message: IMessage): Promise<IMessage> {
+    console.log('Handling result message:', message);
+    return message;
   }
 
   /**
@@ -366,9 +346,9 @@ export class Orchestrator {
    *
    * @param message - The status message to handle
    */
-  private async handleStatusMessage(): Promise<void> {
-    // Handle status updates
-    // console.log(`Status update from ${message.sender}:`, message.payload);
+  private async handleStatusMessage(message: IMessage): Promise<IMessage> {
+    console.log('Handling status message:', message);
+    return message;
   }
 
   /**
@@ -376,9 +356,9 @@ export class Orchestrator {
    *
    * @param message - The error message to handle
    */
-  private async handleErrorMessage(): Promise<void> {
-    // Handle error reports
-    // console.error(`Error from ${message.sender}:`, message.payload);
+  private async handleErrorMessage(message: IMessage): Promise<IMessage> {
+    console.log('Handling error message:', message);
+    return message;
   }
 
   /**
@@ -386,8 +366,8 @@ export class Orchestrator {
    *
    * @param message - The control message to handle
    */
-  private async handleControlMessage(): Promise<void> {
-    // Handle control commands
-    // console.log(`Control message from ${message.sender}:`, message.payload);
+  private async handleControlMessage(message: IMessage): Promise<IMessage> {
+    console.log('Handling control message:', message);
+    return message;
   }
 }
